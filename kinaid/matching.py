@@ -1,5 +1,6 @@
 import pandas as pd
 import math
+from bisect import bisect_left
 
 class PWM_Matrices : 
 
@@ -201,5 +202,22 @@ class Scoring:
             return self._st_kinase_names
         else :
             raise ValueError('Invalid kinase type')
-        
-    
+
+class PeptideBackground :
+    def __init__(self, background_file : str) :
+        df = pd.read_csv(background_file, sep = '\t', usecols=lambda x: x not in {'sequence', 'clean_seq'})
+        self._background_size = len(df)
+        kinase_names = list(df.columns)
+        self._kinase_names = kinase_names
+        self._background = {k:sorted(df[k].to_list()) for k in kinase_names}
+
+    def get_percentile(self, score : float, kinase : str, low_score_skip : bool = False) :
+        if low_score_skip and ((type(score) == float  or type(score) == int) and (score <= 0)) :
+            return 0
+        i = bisect_left(self._background[kinase], score)
+        percentile = i/self._background_size * 100
+        return percentile
+
+class Match :
+    def __init__(self) :
+        pass
