@@ -1,6 +1,7 @@
 import pandas as pd
 import math
 from bisect import bisect_left
+from typing import List
 
 class PWM_Matrices : 
 
@@ -126,14 +127,11 @@ class Scoring:
             raise ValueError('Invalid sequence format')
     
 
-    def __init__(self, st_pwm_matrices : PWM_Matrices, y_pwm_matrices : PWM_Matrices) :
-        self._st_pwm_matrices = st_pwm_matrices
-        self._y_pwm_matrices = y_pwm_matrices
-        self._st_kinase_names = st_pwm_matrices._kinase_names
-        self._y_kinase_names = y_pwm_matrices._kinase_names
-        self._has_st_favorability = st_pwm_matrices._has_favorability
-        self._st_range = st_pwm_matrices._range
-        self._y_range = y_pwm_matrices._range
+    def __init__(self, pwm_matrices : PWM_Matrices) :
+        self._pwm_matrices = pwm_matrices
+        self._kinase_names = pwm_matrices._kinase_names
+        self._has_st_favorability = pwm_matrices._has_favorability
+        self._range = pwm_matrices._range
 
     def clean_sequence(self, sequence : str, mode = None) -> str:
         if mode is None:
@@ -147,35 +145,24 @@ class Scoring:
                 raise ValueError('Invalid sequence format: too many stars')
             phosphorylated_site = split_sequence[0][-1]
             split_sequence[0] = split_sequence[0][:-1]
-            if phosphorylated_site.islower():
-                phosphorylated_site = phosphorylated_site.upper()
 
         elif mode == 'center':
             split_sequence = [sequence[:len(sequence) // 2], sequence[len(sequence) // 2 + 1:]]
             phosphorylated_site = sequence[len(sequence) // 2]
-            if phosphorylated_site.islower():
-                phosphorylated_site = phosphorylated_site.upper()
 
-        if phosphorylated_site == 'Y':
-            left_side_len = 0 - self._y_range[0]
-            right_side_len = self._y_range[1]
-        elif phosphorylated_site == 'S' or phosphorylated_site == 'T':
-            left_side_len = 0 - self._st_range[0]
-            right_side_len = self._st_range[1]
-        else:
+
+
+        if phosphorylated_site not in Scoring.__valid_phosphorylation_sites__:
             raise ValueError(f'Invalid phosphorylated site: {phosphorylated_site}')
+
+        phosphorylated_site = phosphorylated_site.upper()
+
+        left_side_len = 0 - self._range[0]
+        right_side_len = self._range[1]
 
         left_side = '_' * (left_side_len - len(split_sequence[0])) + split_sequence[0] if len(split_sequence[0]) < left_side_len else split_sequence[0][-left_side_len:]
 
         right_side = split_sequence[1] + '_' * (right_side_len - len(split_sequence[1])) if len(split_sequence[1]) < right_side_len else split_sequence[1][:right_side_len]
-
-        #print(split_sequence)
-        #print('left side len:', left_side_len)
-        #print('right side len:', right_side_len)
-        #print('phosphorylated site:', phosphorylated_site)
-        #print('left side:', left_side)
-        #print('right side:', right_side)
-
 
         return left_side + phosphorylated_site + right_side
 
@@ -188,20 +175,13 @@ class Scoring:
 
         phosphorylation_site = cleaned_sequence[len(cleaned_sequence) // 2]
 
-        if phosphorylation_site == 'Y':
-            return self._y_pwm_matrices.score_peptide(cleaned_sequence, kinase, log_score)
-        elif phosphorylation_site == 'S' or phosphorylation_site == 'T':
-            return self._st_pwm_matrices.score_peptide(cleaned_sequence, kinase, log_score)
-        else:
+        if phosphorylation_site == 'Y' or phosphorylation_site == 'S' or phosphorylation_site == 'T' :
+            return self._pwm_matrices.score_peptide(cleaned_sequence, kinase, log_score)
+        else :
             raise ValueError('Invalid phosphorylated site')
         
-    def get_kinase_names(self, kinase_type) :
-        if kinase_type == 'Y' :
-            return self._y_kinase_names
-        elif kinase_type == 'ST' :
-            return self._st_kinase_names
-        else :
-            raise ValueError('Invalid kinase type')
+    def get_kinase_names(self) :
+        return self._kinase_names
 
 class PeptideBackground :
     def __init__(self, background_file : str) :
@@ -219,5 +199,26 @@ class PeptideBackground :
         return percentile
 
 class Match :
-    def __init__(self) :
-        pass
+    def __init__(self, scoring : Scoring, background : PeptideBackground) :
+        if not scoring._kinase_names == background._kinase_names :
+            raise ValueError('Kinase names do not match between scoring and background')
+        self._scoring = scoring
+        self._background = background
+        self._kinase_names = scoring._kinase_names
+
+    def get_percentile(self, sequence : str, kinase : str, mode : str = None, low_score_skip : bool = False) :
+        score = self._scoring.score_peptide(sequence, kinase, mode)
+        return self._background.get_percentile(score, kinase, low_score_skip)
+    
+    def get_percentiles_for_kinase(self, sequences : List[str], kinase : str, mode : str = None, low_score_skip : bool = False) :
+        return [self.get_percentile(s, kinase, mode, low_score_skip) for s in sequences]
+    
+    def get_percentiles(self, sequences : List[str], mode : str = None, low_score_skip : bool = False) :
+        return {k:self.get_percentiles_for_kinase(sequences, k, mode, low_score_skip) for k in self._kinase_names}
+    
+    def get_percentiles_df(self, sequences : List[str], mode : str = None, low_score_skip : bool = False) :
+        percentiles = self.get_percentiles(sequences, mode, low_score_skip)
+        return pd.DataFrame(percentiles, index = sequences)
+    
+    def get_matched_kinases(self, sequence : str, threshold = 90.0, mode : str = None, low_score_skip : bool = False) :
+        return [k for k in self._kinase_names if self.get_percentile(sequence, k, mode, low_score_skip) > threshold]
