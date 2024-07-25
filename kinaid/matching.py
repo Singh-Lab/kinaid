@@ -102,6 +102,9 @@ class PWM_Matrices :
     def score_peptide(self, sequence : str, kinase : str, log_score : bool = False) -> float:
         return PWM_Matrices.score_peptide_with_matrix(sequence, *self.get_matrix_and_cols(kinase), self.get_favorability(kinase), log_score)
     
+    def get_kinase_names(self) :
+        return self._kinase_names
+    
 class Scoring:
     __valid_phosphorylation_sites__ = {'S', 'T', 'Y', 's', 't', 'y'}
     
@@ -189,5 +192,14 @@ class Scoring:
         elif phosphorylation_site == 'S' or phosphorylation_site == 'T':
             return self._st_pwm_matrices.score_peptide(cleaned_sequence, kinase, log_score)
         else:
-            raise ValueError('Invalid phosphorylated site') 
-   
+            raise ValueError('Invalid phosphorylated site')
+        
+    def get_kinase_names(self, kinase_type) :
+        if kinase_type == 'Y' :
+            return self._y_kinase_names
+        elif kinase_type == 'ST' :
+            return self._st_kinase_names
+        else :
+            raise ValueError('Invalid kinase type')
+        
+    
