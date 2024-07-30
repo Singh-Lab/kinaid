@@ -2,6 +2,8 @@ import requests
 import time
 import pandas as pd
 import os
+import numpy as np
+from mpire import WorkerPool
 
 class Utility :
     MAPPING_API = 'https://rest.uniprot.org/idmapping/run/'
@@ -18,7 +20,31 @@ class Utility :
                     if chunk: 
                         file.write(chunk)
 
+    @staticmethod
+    def rearrange_matrices (matrices_file : str = './out/johnson_ST_matrices.xlsx',
+                            sheet_name : str = 'ser_thr_all_norm_scaled_matrice', 
+                        output_file : str = './out/ST-Kinases.xlsx', 
+                        pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4']):
+        ae_df = pd.read_excel(matrices_file, engine='openpyxl', sheet_name=sheet_name)
+        #rename first column to Kinase
+        ae_df.rename(columns={ae_df.columns[0]: 'Kinase'}, inplace=True)
+        ae_df.set_index('Kinase', inplace=True)
 
+        res = ['P','G','A','C','S','T','V','I','L','M','F','Y','W','H','K','R','Q','N','D','E','s','t','y']
+
+        kinase_matrices = {}
+        for k,row in ae_df.iterrows() :
+            probs = row.to_numpy()
+            prob_matrix = np.reshape(probs, (len(pos),len(res)))
+            prob_matrix_t = prob_matrix.transpose()
+            kdf = pd.DataFrame(prob_matrix_t, columns=pos, index=res)
+            kdf.index.name = 'AA'
+            kinase_matrices[k] = kdf
+
+        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+            any(df.to_excel(writer, sheet_name=k) for k, df in kinase_matrices.items())
+        
+    
     @staticmethod
     def make_map_ids_job(list_of_ids : list, from_db : str ='UniProtKB_AC-ID', to_db : str = 'GeneID') -> str:
         ids = ','.join(list_of_ids)
@@ -70,49 +96,64 @@ class Utility :
                     best_score : bool = True,
                     best_score_rev : bool = True,
                     species_specific : bool =True,
-                    confidence = 'moderate') -> list:
+                    confidence = 'moderate',
+                    exponential_backoff : bool = True,
+                    max_tries : int = 5) -> list :
         
         id = gene
         url = f'{url}/{in_taxon}/{id}/{out_taxon}/best_match'
-        response = requests.post(url)
+        for i in range(max_tries) :
+            response = None
+            try: 
+                response = requests.post(url)
+            except requests.ConnectTimeout:
+                print('Connection timeout')
+            except requests.ConnectionError:
+                print('Connection error, waiting for 60 seconds')
+                time.sleep(60)
+            if response == None or not response.ok:
+                if response != None:
+                    print('Server responded:', response.status_code)
+                    print(response.text)
+                if exponential_backoff:
+                    time.sleep(2**i)
+                else:
+                    time.sleep(1)
+            else :
+                break
 
         map_confidence = {'high': 3, 'moderate': 2, 'low': 1}
         confidence_filter = map_confidence[confidence]
                         
-        if not response.ok:
-            print('Server responded:', response.status_code)
-            print(response.text)
-            return None
+        result =  response.json()
+        if id not in result['results']:
+            return [(-1, None, None, None, None, None, None)]
         else :
-            result =  response.json()
-            if id not in result['results']:
-                return [(-1, None, None, None, None, None, None)]
-            else :
-                id_block = result['results'][id]
-                matches = []
-                for match in id_block.keys() :
-                    best_match = int(match)
-                    result_best_score = id_block[match]['best_score']
-                    result_best_score_rev = id_block[match]['best_score_rev']
-                    result_confidence = map_confidence[id_block[match]['confidence']]
-                    result_symbol = id_block[match]['symbol']
-                    if best_score and result_best_score == "No":
-                        best_match = -1
-                    if best_score_rev and result_best_score_rev == "No":
-                        best_match = -1
-                    match_confidence = result_confidence
-                    if match_confidence < confidence_filter:
-                        best_match = -1
-                    if best_match > 0:
-                        species_specific_geneid_type = None
-                        species_specific_geneid = None
-                        if species_specific:
-                            species_specific_geneid_type = id_block[match]['species_specific_geneid_type']
-                            species_specific_geneid = id_block[match]['species_specific_geneid']
-                        matches.append((best_match, species_specific_geneid_type, species_specific_geneid, match_confidence, result_best_score == 'Yes', result_best_score_rev == 'Yes', result_symbol))
-                if len(matches) == 0:
-                    matches.append((-1, None, None, None, None, None, None))
-                return matches
+            id_block = result['results'][id]
+            matches = []
+            for match in id_block.keys() :
+                best_match = int(match)
+                result_best_score = id_block[match]['best_score']
+                result_best_score_rev = id_block[match]['best_score_rev']
+                result_confidence = map_confidence[id_block[match]['confidence']]
+                result_symbol = id_block[match]['symbol']
+                if best_score and result_best_score == "No":
+                    best_match = -1
+                if best_score_rev and result_best_score_rev == "No":
+                    best_match = -1
+                match_confidence = result_confidence
+                if match_confidence < confidence_filter:
+                    best_match = -1
+                if best_match > 0:
+                    species_specific_geneid_type = None
+                    species_specific_geneid = None
+                    if species_specific:
+                        species_specific_geneid_type = id_block[match]['species_specific_geneid_type']
+                        species_specific_geneid = id_block[match]['species_specific_geneid']
+                    matches.append((best_match, species_specific_geneid_type, species_specific_geneid, match_confidence, result_best_score == 'Yes', result_best_score_rev == 'Yes', result_symbol))
+            if len(matches) == 0:
+                matches.append((-1, None, None, None, None, None, None))
+            return matches
 
     @staticmethod
     def download_proteome(organism_name : str,
@@ -153,31 +194,13 @@ class Utility :
         entrez_to_uniprot_dict = {int(e): uniprot for uniprot, entrez_id_list in uniprot_to_entrez_dict.items() for e in entrez_id_list}
 
         return entrez_to_uniprot_dict
-  
+
     @staticmethod
-    def build_ortholog_database_for_organism(
-            human_kinase_entrez_ids : set,
-            organism_name : str,
-            taxon_id : int,
-            proteome_id : str,
-            canonical_only : bool = False,
-            best_score : bool = True,
-            best_score_rev : bool = False,
-            confidence : str = 'moderate',
-            species_specific_geneid : bool = True,
-            proteome_dir : str = 'proteomes') -> pd.DataFrame :
-        Utility.download_proteome(organism_name, taxon_id, proteome_id, canonical_only, proteome_dir)
-
-        filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{"con" if canonical_only else "noncon"}.tsv')
-
-        entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
-        print(len(entrez_id_dict))
-
     def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids:set, best_score:bool=True, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
         __human_tax_id = '9606'
         matches = Utility.get_orthologs(species_entrez_id, in_taxon=tax_id, out_taxon=__human_tax_id, best_score=best_score, best_score_rev=best_score_rev, confidence=confidence, species_specific=species_specific)
         
-        matched_human_kinase = [(species_entrez_id, ortholog,species_specific_geneid_type,
+        matched_human_kinase = [(species_entrez_id, ortholog, species_specific_geneid_type,
                                 species_specific_geneid,
                                 match_confidence,
                                     result_best_score,
@@ -193,12 +216,186 @@ class Utility :
             return None
         else:
             return matched_human_kinase
+            
+    @staticmethod
+    def job(shared_objects, entrez_id) :
+        taxon_id = shared_objects['taxon_id']
+        human_kinase_entrez_ids = shared_objects['human_kinase_entrez_ids']
+        best_score = shared_objects['best_score']
+        best_score_rev = shared_objects['best_score_rev']
+        confidence = shared_objects['confidence']
+        species_specific = shared_objects['species_specific']
+        return Utility.get_ortholog_in_human(taxon_id, entrez_id, human_kinase_entrez_ids, best_score, best_score_rev, confidence, species_specific)
+    
+    @staticmethod
+    def build_ortholog_database_for_organism(
+            human_kinase_entrez_ids : set,
+            organism_name : str,
+            taxon_id : int,
+            proteome_id : str,
+            kinase_type : str,
+            canonical_only : bool = False,
+            best_score : bool = True,
+            best_score_rev : bool = False,
+            confidence : str = 'moderate',
+            species_specific_geneid : bool = True,
+            proteome_dir : str = 'proteomes',
+            threads = 2) -> pd.DataFrame :
+        Utility.download_proteome(organism_name, taxon_id, proteome_id, canonical_only, proteome_dir)
+
+        filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{"con" if canonical_only else "noncon"}.tsv')
+
+        entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
+        
+        organism_entrez_ids = set(entrez_id_dict.keys())
+        shared_objects = {'taxon_id' : taxon_id,
+                          'human_kinase_entrez_ids' : human_kinase_entrez_ids,
+                          'best_score' : best_score,
+                          'best_score_rev' : best_score_rev,
+                          'confidence' : confidence,
+                          'species_specific' : species_specific_geneid}
+        
+        with WorkerPool(threads, shared_objects=shared_objects, start_method='fork') as pool:
+            results = pool.map_unordered(Utility.job, organism_entrez_ids, progress_bar=True)
+
+        #remove None values from the list
+        results = [x for x in results if x is not None]
+
+        #flatten the list
+        results = [item for sublist in results for item in sublist]
+        
+        print('Finished for species: ' + organism_name)
+        
+        result_df = pd.DataFrame(results, columns=['species_entrez_id', 'human_entrez_id', 'species_specific_geneid_type', 'species_specific_geneid', 'match_confidence', 'result_best_score', 'result_best_score_rev', 'result_symbol'])
+        
+        result_df['species_entrez_id'] = result_df['species_entrez_id'].astype(int) 
+        result_df['human_entrez_id'] = result_df['human_entrez_id'].astype(int)
+        result_df['kinase_type'] = kinase_type
+        
+        return result_df
+        
+        #result_df.to_csv(output_file, sep='\t', index=False)
         
 if __name__ == '__main__' :
+    data_dir = './data'
+    threads = 4
 
-    Utility.build_ortholog_database_for_organism({}, 'human', 9606, 'UP000005640')
-    Utility.build_ortholog_database_for_organism({}, 'mouse', 10090, 'UP000000589')
-    Utility.build_ortholog_database_for_organism({}, 'fly', 7227, 'UP000000803')
-    Utility.build_ortholog_database_for_organism({}, 'worm', 6239, 'UP000001940')
-    Utility.build_ortholog_database_for_organism({}, 'yeast', 4932, 'UP000002311')
-    Utility.build_ortholog_database_for_organism({}, 'zebrafish', 7955, 'UP000000437')
+    johnson_ST_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM4_ESM.xlsx'
+    johnson_ST_matrices_original_file = os.path.join(data_dir,'johnson_ST_matrices.xlsx')
+
+    if not os.path.exists(johnson_ST_matrices_original_file):
+        Utility.download_file(johnson_ST_matrices_url, johnson_ST_matrices_original_file)
+        
+    johnson_ST_matrices_file = os.path.join(data_dir,'ST-Kinases.xlsx')
+    Utility.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_norm_scaled_matrice', output_file=johnson_ST_matrices_file)
+
+    densitometry_file = os.path.join(data_dir,'ST-Kinases_densitometry.xlsx')
+    Utility.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_raw_matrices', output_file=densitometry_file)
+
+    johnson_Y_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM4_ESM.xlsx'
+    johnson_Y_matrices_original_file = os.path.join(data_dir,'johnson_Y_matrices.xlsx')
+
+    if not os.path.exists(johnson_Y_matrices_original_file):
+        Utility.download_file(johnson_Y_matrices_url, johnson_Y_matrices_original_file)
+
+    johnson_Y_matrices_file = os.path.join(data_dir,'Y-Kinases.xlsx')
+    Utility.rearrange_matrices(johnson_Y_matrices_original_file, sheet_name = 'tyrosine_all_norm_scaled_matric', pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4', '5'], output_file = johnson_Y_matrices_file)
+
+    ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
+    ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
+
+    Y_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM3_ESM.xlsx'
+
+    ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
+    Y_matrix_to_uniprot = os.path.join(data_dir,'Y-Kinases_to_Uniprot.xlsx')
+
+    if not os.path.exists(ST_matrix_to_uniprot):
+        Utility.download_file(ST_matrix_to_uniprot_url, ST_matrix_to_uniprot)
+
+    if not os.path.exists(Y_matrix_to_uniprot):
+        Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
+
+    ochoa_background_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM5_ESM.xlsx'
+
+
+    ochoa_background_original_file = os.path.join(data_dir,'ochoa_background.xlsx')
+
+
+    if not os.path.exists(ochoa_background_original_file):
+        Utility.download_file(ochoa_background_url, ochoa_background_original_file)
+
+
+    tyrosine_background_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM5_ESM.xlsx'
+
+    tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
+
+    if not os.path.exists(tyrosine_background_original_file):
+        Utility.download_file(tyrosine_background_url, tyrosine_background_original_file)
+
+    st_kinases_df = pd.read_excel(ST_matrix_to_uniprot, sheet_name='Table S1 Data')
+    st_kinase_dict = dict(zip(st_kinases_df['Matrix_name'], st_kinases_df['Uniprot id']))
+    
+    y_kinases_df = pd.read_excel(Y_matrix_to_uniprot, sheet_name='Table_S1_Data')
+    
+    #remove rows that have entry in the SUBTYPE column
+    y_kinases_df = y_kinases_df[~y_kinases_df['SUBTYPE'].isnull()]
+    y_kinase_dict = dict(zip(y_kinases_df['MATRIX_NAME'], y_kinases_df['UNIPROT_ID']))
+    
+    st_kinases_uniprot = set(st_kinase_dict.values())
+    y_kinases_uniprot = set(y_kinase_dict.values())
+    
+    #human_kinase_dict = {**st_kinase_dict, **y_kinase_dict}
+
+    
+    #human_kinases_uniprot = st_kinases_uniprot | y_kinases_uniprot
+    #human_uniprot_to_entrez_job = Utility.make_map_ids_job(human_kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
+    
+    #human_kinases_uniprot_to_entrez_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_job)
+    
+    #for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_dict.items():
+    #    if len(entrez_id_list) != 1:
+    #        print('Warning: entrez id list size not 1')
+    #        print(uniprot)
+    #        print(entrez_id_list)
+            
+    #uniprot_to_human_kinase = {v: k for k, v in human_kinase_dict.items()}
+    #human_entrez_to_uniprot_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_dict.items() for e in entrez_id_list}
+
+    #human_entrez_ids = set(human_entrez_to_uniprot_dict.keys())
+
+    human_uniprot_to_entrez_st_job = Utility.make_map_ids_job(st_kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
+    human_uniprot_to_entrez_y_job = Utility.make_map_ids_job(y_kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
+    
+    human_kinases_uniprot_to_entrez_st_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_st_job)
+    human_kinases_uniprot_to_entrez_y_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_y_job)
+    
+    uniprot_to_human_kinase_st_dict = {v: k for k, v in st_kinase_dict.items()}
+    uniprot_to_human_kinase_y_dict = {v: k for k, v in y_kinase_dict.items()}
+    
+    human_entrez_st_ids = set(human_kinases_uniprot_to_entrez_st_dict.keys())
+    human_entrez_y_ids = set(human_kinases_uniprot_to_entrez_y_dict.keys())
+    
+    orthologs_dir = 'orthologs'
+    
+    if not os.path.exists(orthologs_dir):
+        os.makedirs(orthologs_dir)
+    
+    
+    #Utility.build_ortholog_database_for_organism(human_entrez_ids, 'human', 9606, 'UP000005640')
+    arguments = [('mouse', 10090, 'UP000000589'),
+                ('fly', 7227, 'UP000000803'),
+                ('worm', 6239, 'UP000001940'),
+                ('yeast', 4932, 'UP000002311'),
+                ('zebrafish', 7955, 'UP000000437')]
+    
+    for organism_name, taxon_id, proteome_id in arguments :
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
+        if not os.path.exists(output_file):
+            print(f'Building ortholog database for {organism_name}')
+            df_st =Utility.build_ortholog_database_for_organism(human_entrez_st_ids, organism_name, taxon_id, proteome_id, 'ST', threads=threads)
+            df_y = Utility.build_ortholog_database_for_organism(human_entrez_y_ids, organism_name, taxon_id, proteome_id, 'Y', threads=threads)
+            
+            df_final = pd.concat([df_st, df_y], ignore_index=True)
+            df_final.to_csv(output_file, sep='\t', index=False)
+        else :
+            print(f'Ortholog database for {organism_name} already exists')
