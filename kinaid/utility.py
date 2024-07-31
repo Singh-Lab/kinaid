@@ -99,8 +99,7 @@ class Utility :
                     confidence = 'moderate',
                     exponential_backoff : bool = True,
                     max_tries : int = 5) -> list :
-        
-        id = gene
+        id = str(gene)
         url = f'{url}/{in_taxon}/{id}/{out_taxon}/best_match'
         for i in range(max_tries) :
             response = None
@@ -137,12 +136,15 @@ class Utility :
                 result_best_score_rev = id_block[match]['best_score_rev']
                 result_confidence = map_confidence[id_block[match]['confidence']]
                 result_symbol = id_block[match]['symbol']
-                if best_score and result_best_score == "No":
+                if best_score and result_best_score == 'No':
                     best_match = -1
-                if best_score_rev and result_best_score_rev == "No":
+                    print('score')
+                if best_score_rev and result_best_score_rev == 'No':
+                    print('rev')
                     best_match = -1
                 match_confidence = result_confidence
                 if match_confidence < confidence_filter:
+                    print(f'confidence: {match_confidence}')
                     best_match = -1
                 if best_match > 0:
                     species_specific_geneid_type = None
@@ -150,8 +152,10 @@ class Utility :
                     if species_specific:
                         species_specific_geneid_type = id_block[match]['species_specific_geneid_type']
                         species_specific_geneid = id_block[match]['species_specific_geneid']
+                    print('match')
                     matches.append((best_match, species_specific_geneid_type, species_specific_geneid, match_confidence, result_best_score == 'Yes', result_best_score_rev == 'Yes', result_symbol))
             if len(matches) == 0:
+                print('no matches')
                 matches.append((-1, None, None, None, None, None, None))
             return matches
 
@@ -199,7 +203,6 @@ class Utility :
     def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids:set, best_score:bool=True, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
         __human_tax_id = '9606'
         matches = Utility.get_orthologs(species_entrez_id, in_taxon=tax_id, out_taxon=__human_tax_id, best_score=best_score, best_score_rev=best_score_rev, confidence=confidence, species_specific=species_specific)
-        
         matched_human_kinase = [(species_entrez_id, ortholog, species_specific_geneid_type,
                                 species_specific_geneid,
                                 match_confidence,
@@ -248,6 +251,7 @@ class Utility :
         entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
         
         organism_entrez_ids = set(entrez_id_dict.keys())
+        
         shared_objects = {'taxon_id' : taxon_id,
                           'human_kinase_entrez_ids' : human_kinase_entrez_ids,
                           'best_score' : best_score,
@@ -382,11 +386,13 @@ if __name__ == '__main__' :
     
     
     #Utility.build_ortholog_database_for_organism(human_entrez_ids, 'human', 9606, 'UP000005640')
-    arguments = [('mouse', 10090, 'UP000000589'),
-                ('fly', 7227, 'UP000000803'),
-                ('worm', 6239, 'UP000001940'),
-                ('yeast', 4932, 'UP000002311'),
-                ('zebrafish', 7955, 'UP000000437')]
+    arguments = [
+                    ('mouse', 10090, 'UP000000589'),
+#                    ('fly', 7227, 'UP000000803'),
+#                    ('worm', 6239, 'UP000001940'),
+#                    ('yeast', 4932, 'UP000002311'),
+#                    ('zebrafish', 7955, 'UP000000437')
+                ]
     
     for organism_name, taxon_id, proteome_id in arguments :
         output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
