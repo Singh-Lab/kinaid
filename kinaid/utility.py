@@ -6,7 +6,9 @@ import numpy as np
 from mpire import WorkerPool
 
 class Utility :
-    MAPPING_API = 'https://rest.uniprot.org/idmapping/run/'
+    __MAPPING_API = 'https://rest.uniprot.org/idmapping/run/'
+    __map_confidence = {'high': 3, 'moderate': 2, 'low': 1}
+
 
     @staticmethod
     def download_file(url : str, filename : str):
@@ -48,7 +50,7 @@ class Utility :
     @staticmethod
     def make_map_ids_job(list_of_ids : list, from_db : str ='UniProtKB_AC-ID', to_db : str = 'GeneID') -> str:
         ids = ','.join(list_of_ids)
-        url = Utility.MAPPING_API
+        url = Utility.__MAPPING_API
         params = {'from': from_db, 'to': to_db, 'ids': ids}
         response = requests.post(url, data=params)
 
@@ -121,8 +123,7 @@ class Utility :
             else :
                 break
 
-        map_confidence = {'high': 3, 'moderate': 2, 'low': 1}
-        confidence_filter = map_confidence[confidence]
+        confidence_filter = Utility.__map_confidence[confidence]
                         
         result =  response.json()
         if id not in result['results']:
@@ -134,17 +135,18 @@ class Utility :
                 best_match = int(match)
                 result_best_score = id_block[match]['best_score']
                 result_best_score_rev = id_block[match]['best_score_rev']
-                result_confidence = map_confidence[id_block[match]['confidence']]
-                result_symbol = id_block[match]['symbol']
+                result_confidence = Utility.__map_confidence[id_block[match]['confidence']]
+                #result_symbol = id_block[match]['symbol']
+                result_symbol = result['search_details']['gene_details'][0]['symbol']
                 if best_score and result_best_score == 'No':
                     best_match = -1
-                    print('score')
+                    #print('score')
                 if best_score_rev and result_best_score_rev == 'No':
-                    print('rev')
+                    #print('rev')
                     best_match = -1
                 match_confidence = result_confidence
                 if match_confidence < confidence_filter:
-                    print(f'confidence: {match_confidence}')
+                    #print(f'confidence: {match_confidence}')
                     best_match = -1
                 if best_match > 0:
                     species_specific_geneid_type = None
@@ -152,10 +154,10 @@ class Utility :
                     if species_specific:
                         species_specific_geneid_type = id_block[match]['species_specific_geneid_type']
                         species_specific_geneid = id_block[match]['species_specific_geneid']
-                    print('match')
+                    #print('match')
                     matches.append((best_match, species_specific_geneid_type, species_specific_geneid, match_confidence, result_best_score == 'Yes', result_best_score_rev == 'Yes', result_symbol))
             if len(matches) == 0:
-                print('no matches')
+                #print('no matches')
                 matches.append((-1, None, None, None, None, None, None))
             return matches
 
@@ -279,10 +281,35 @@ class Utility :
         return result_df
         
         #result_df.to_csv(output_file, sep='\t', index=False)
+
+    @staticmethod
+    def refactor_ortholog_file(ortholog_file : str,
+                            organism : str,
+                            entrez_to_human_kinase_dict : dict,
+                            output_file : str,
+                            match_confidence : str  = 'moderate',
+                            result_best_score : bool = True,
+                            result_best_score_rev : bool = True) :
+        df = pd.read_csv(ortholog_file, sep='\t')
+        df['kinase_name'] = df['human_entrez_id'].map(entrez_to_human_kinase_dict)
+        df['organism'] = organism
+        df['geneid_type'] = 'GeneID'
+        df['gene_id'] = df['species_entrez_id']
+        confidence = Utility.__map_confidence[match_confidence]
+        df = df[df['match_confidence'] >= confidence]
+        if result_best_score:
+            df = df[df['result_best_score']]
+        if result_best_score_rev:
+            df = df[df['result_best_score_rev']]
+        df.drop(columns=['species_specific_geneid', 'human_entrez_id', 'species_specific_geneid_type', 'species_entrez_id', 'match_confidence', 'result_best_score', 'result_best_score_rev'], inplace=True)
+
+        df = df[['organism', 'kinase_name', 'kinase_type', 'geneid_type', 'gene_id', 'result_symbol']]
+        df.to_csv(output_file, sep='\t', index=False)
+
         
 if __name__ == '__main__' :
     data_dir = './data'
-    threads = 4
+    threads = 8
 
     johnson_ST_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM4_ESM.xlsx'
     johnson_ST_matrices_original_file = os.path.join(data_dir,'johnson_ST_matrices.xlsx')
@@ -347,6 +374,12 @@ if __name__ == '__main__' :
     
     st_kinases_uniprot = set(st_kinase_dict.values())
     y_kinases_uniprot = set(y_kinase_dict.values())
+
+    #which kinases are in both sets
+    dual_specificity_kinases = st_kinases_uniprot & y_kinases_uniprot
+
+    print('Dual specificity kinases')
+    print(dual_specificity_kinases)
     
     #human_kinase_dict = {**st_kinase_dict, **y_kinase_dict}
 
@@ -376,8 +409,11 @@ if __name__ == '__main__' :
     uniprot_to_human_kinase_st_dict = {v: k for k, v in st_kinase_dict.items()}
     uniprot_to_human_kinase_y_dict = {v: k for k, v in y_kinase_dict.items()}
     
-    human_entrez_st_ids = set(human_kinases_uniprot_to_entrez_st_dict.keys())
-    human_entrez_y_ids = set(human_kinases_uniprot_to_entrez_y_dict.keys())
+    human_kinases_entrez_to_uniprot_st_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_st_dict.items() for e in entrez_id_list}
+    human_kinases_entrez_to_uniprot_y_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_y_dict.items() for e in entrez_id_list}
+
+    human_entrez_st_ids = set(human_kinases_entrez_to_uniprot_st_dict.keys())
+    human_entrez_y_ids = set(human_kinases_entrez_to_uniprot_y_dict.keys())
     
     orthologs_dir = 'orthologs'
     
@@ -388,10 +424,10 @@ if __name__ == '__main__' :
     #Utility.build_ortholog_database_for_organism(human_entrez_ids, 'human', 9606, 'UP000005640')
     arguments = [
                     ('mouse', 10090, 'UP000000589'),
-#                    ('fly', 7227, 'UP000000803'),
-#                    ('worm', 6239, 'UP000001940'),
-#                    ('yeast', 4932, 'UP000002311'),
-#                    ('zebrafish', 7955, 'UP000000437')
+                    ('fly', 7227, 'UP000000803'),
+                    ('worm', 6239, 'UP000001940'),
+                    ('yeast', 4932, 'UP000002311'),
+                    ('zebrafish', 7955, 'UP000000437')
                 ]
     
     for organism_name, taxon_id, proteome_id in arguments :
@@ -405,3 +441,16 @@ if __name__ == '__main__' :
             df_final.to_csv(output_file, sep='\t', index=False)
         else :
             print(f'Ortholog database for {organism_name} already exists')
+
+    uniprot_to_human_kinase_st_dict = {u : k for k,u in st_kinase_dict.items()}
+    uniprot_to_human_kinase_y_dict = {u : k for k,u in y_kinase_dict.items()}
+
+    entrez_to_human_kinase_st_dict = {e : uniprot_to_human_kinase_st_dict[u] for e,u in human_kinases_entrez_to_uniprot_st_dict.items()}
+    entrez_to_human_kinase_y_dict = {e : uniprot_to_human_kinase_y_dict[u] for e,u in human_kinases_entrez_to_uniprot_y_dict.items()}
+
+    entrez_to_human_kinase_dict = {**entrez_to_human_kinase_st_dict, **entrez_to_human_kinase_y_dict}
+
+    for organism_name, taxon_id, proteome_id in arguments :
+        ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
+        Utility.refactor_ortholog_file(ortholog_file, organism_name, entrez_to_human_kinase_dict, output_file)
