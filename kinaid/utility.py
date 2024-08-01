@@ -49,9 +49,16 @@ class Utility :
     
     @staticmethod
     def make_map_ids_job(list_of_ids : list, from_db : str ='UniProtKB_AC-ID', to_db : str = 'GeneID') -> str:
+        if from_db == to_db:
+            return None
+        if from_db == 'UniProtKB' :
+            from_db2 = 'UniProtKB_AC-ID'
+        else :
+            from_db2 = from_db
+        
         ids = ','.join(list_of_ids)
         url = Utility.__MAPPING_API
-        params = {'from': from_db, 'to': to_db, 'ids': ids}
+        params = {'from': from_db2, 'to': to_db, 'ids': ids}
         response = requests.post(url, data=params)
 
         if not response.ok:
@@ -322,6 +329,40 @@ class Utility :
         df = df[['organism', 'kinase_name', 'kinase_type', 'geneid_type', 'gene_id', 'result_symbol']]
         df.to_csv(output_file, sep='\t', index=False)
 
+    @staticmethod
+    def add_supported_id_by_geneid(df, geneid_type, original_geneid_type = 'GeneID', unmapped_kinases = None) :
+
+        if geneid_type == original_geneid_type :
+            return df_copy, set()
+        
+
+        df_copy = df[df['geneid_type'] == original_geneid_type].copy()
+        #convert gene_id column to str
+        df_copy['gene_id'] = df_copy['gene_id'].astype(str)
+
+        kinase_group_df = df_copy[['kinase_name', 'gene_id']].groupby('kinase_name')['gene_id'].apply(set)
+        kinase_to_gene_id_dict = kinase_group_df.to_dict()
+
+
+        if unmapped_kinases == None:
+            unmapped_kinases = kinase_to_gene_id_dict.keys()
+
+        genes_to_map = {g for k in unmapped_kinases for g in kinase_to_gene_id_dict[k]}
+
+        gene_ids_job = Utility.make_map_ids_job(genes_to_map, original_geneid_type, geneid_type)
+        gene_ids_dict = Utility.get_map_ids_results(gene_ids_job)
+
+        unmapped_kinases = {k for k in unmapped_kinases if all(g not in gene_ids_dict or len(gene_ids_dict[g]) == 0 for g in kinase_to_gene_id_dict[k])}
+        
+        df_new = df_copy.copy()
+        del df_copy
+        df_new['gene_id'] = df_new['gene_id'].map(gene_ids_dict)
+        df_new = df_new[~df_new['gene_id'].isnull()]
+        df_new['geneid_type'] = geneid_type
+
+        df_new = df_new.explode('gene_id').reset_index(drop=True)
+
+        return df_new, unmapped_kinases
         
 if __name__ == '__main__' :
     data_dir = './data'
@@ -467,3 +508,45 @@ if __name__ == '__main__' :
         ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
         output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
         Utility.refactor_ortholog_file(ortholog_file, organism_name, entrez_to_human_kinase_dict, output_file)
+    
+    supported_ids_dict = {
+        'mouse'     :   'MGI',
+        'fly'       :   'FlyBase',
+        'worm'      :   'WormBase',
+        'yeast'     :   'SGD',
+        'zebrafish' :   'ZFIN'
+    }
+
+
+    #Gene ID 	Entrez Zebrafish Gene ID 	Entrez Human Gene ID 	ZFIN Gene Symbol 	Affected Structure or Process 1 subterm OBO ID 	Affected Structure or Process 1 subterm name 	Post-Composed Relationship ID 	Post-Composed Relationship Name 	Affected Structure or Process 1 superterm OBO ID 	Affected Structure or Process 1 superterm name 	Phenotype Keyword OBO ID 	Phenotype Quality 	Phenotype Tag 	Affected Structure or Process 2 subterm OBO ID 	Affected Structure or Process 2 subterm name 	Post-Composed Relationship ID 	Post-Composed Relationship Name 	Affected Structure or Process 2 superterm OBO ID 	Affected Structure or Process 2 superterm name
+    #https://zfin.org/downloads/pheno_fish.txt
+    special_mapping = {'zebrafish' : None}
+
+
+    for organism_name, _, _, in arguments :
+        print(organism_name)
+        refactored_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
+        df = pd.read_csv(refactored_file, sep='\t')
+        df_uniprot, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB')
+
+        print(df_uniprot[df_uniprot['kinase_name'] == 'ZAK'])
+
+        df_special, special_unmapped = Utility.add_supported_id_by_geneid(df_uniprot, supported_ids_dict[organism_name], 'UniProtKB')
+        print(special_unmapped)
+
+        #try with GeneID if there are still unmapped ids
+        #if (len(special_unmapped) > 0):
+        #    df_special2, _ = Utility.add_supported_id_by_geneid(df, supported_ids_dict[organism_name],'GeneID', special_unmapped)
+        #    if(len(df_special2) > 0):
+        #        df_special = pd.concat([df_special, df_special2])
+        
+        #if there are uniprot unmapped ids, try with special
+        print(uniprot_unmapped)
+        if (len(uniprot_unmapped) > 0):
+            df_uniprot2, _ = Utility.add_supported_id_by_geneid(df_uniprot, 'UniProtKB', supported_ids_dict[organism_name], uniprot_unmapped)
+            if(len(df_uniprot2) > 0):
+                df_uniprot = pd.concat([df_uniprot, df_uniprot2])
+        
+        df_final = pd.concat([df, df_uniprot, df_special])
+
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_final.tsv')
