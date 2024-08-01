@@ -202,10 +202,10 @@ class Utility :
         return entrez_to_uniprot_dict
 
     @staticmethod
-    def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids:set, best_score:bool=True, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
+    def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids_st:set, human_kinase_entrez_ids_y:set, best_score:bool=True, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
         __human_tax_id = '9606'
         matches = Utility.get_orthologs(species_entrez_id, in_taxon=tax_id, out_taxon=__human_tax_id, best_score=best_score, best_score_rev=best_score_rev, confidence=confidence, species_specific=species_specific)
-        matched_human_kinase = [(species_entrez_id, ortholog, species_specific_geneid_type,
+        matched_human_kinase_st = [('ST', species_entrez_id, ortholog, species_specific_geneid_type,
                                 species_specific_geneid,
                                 match_confidence,
                                     result_best_score,
@@ -216,7 +216,22 @@ class Utility :
                                 match_confidence,
                                     result_best_score,
                                     result_best_score_rev,
-                                        result_symbol in matches if ortholog in human_kinase_entrez_ids]
+                                        result_symbol in matches if ortholog in human_kinase_entrez_ids_st]
+        matched_human_kinase_y = [('Y', species_entrez_id, ortholog, species_specific_geneid_type,
+                                species_specific_geneid,
+                                match_confidence,
+                                    result_best_score,
+                                    result_best_score_rev,
+                                        result_symbol) for ortholog, 
+                            species_specific_geneid_type,
+                                species_specific_geneid,
+                                match_confidence,
+                                    result_best_score,
+                                    result_best_score_rev,
+                                        result_symbol in matches if ortholog in human_kinase_entrez_ids_y]
+        
+        matched_human_kinase = matched_human_kinase_st + matched_human_kinase_y
+        
         if len(matched_human_kinase) == 0:
             return None
         else:
@@ -225,20 +240,21 @@ class Utility :
     @staticmethod
     def job(shared_objects, entrez_id) :
         taxon_id = shared_objects['taxon_id']
-        human_kinase_entrez_ids = shared_objects['human_kinase_entrez_ids']
+        human_kinase_entrez_ids_st = shared_objects['human_kinase_entrez_ids_st']
+        human_kinase_entrez_ids_y = shared_objects['human_kinase_entrez_ids_y']
         best_score = shared_objects['best_score']
         best_score_rev = shared_objects['best_score_rev']
         confidence = shared_objects['confidence']
         species_specific = shared_objects['species_specific']
-        return Utility.get_ortholog_in_human(taxon_id, entrez_id, human_kinase_entrez_ids, best_score, best_score_rev, confidence, species_specific)
+        return Utility.get_ortholog_in_human(taxon_id, entrez_id, human_kinase_entrez_ids_st, human_kinase_entrez_ids_y, best_score, best_score_rev, confidence, species_specific)
     
     @staticmethod
     def build_ortholog_database_for_organism(
-            human_kinase_entrez_ids : set,
+            human_kinase_entrez_ids_st : set,
+            human_kinase_entrez_ids_y : set,
             organism_name : str,
             taxon_id : int,
             proteome_id : str,
-            kinase_type : str,
             canonical_only : bool = False,
             best_score : bool = True,
             best_score_rev : bool = False,
@@ -255,7 +271,8 @@ class Utility :
         organism_entrez_ids = set(entrez_id_dict.keys())
         
         shared_objects = {'taxon_id' : taxon_id,
-                          'human_kinase_entrez_ids' : human_kinase_entrez_ids,
+                          'human_kinase_entrez_ids_st' : human_kinase_entrez_ids_st,
+                          'human_kinase_entrez_ids_y' : human_kinase_entrez_ids_y,
                           'best_score' : best_score,
                           'best_score_rev' : best_score_rev,
                           'confidence' : confidence,
@@ -272,12 +289,11 @@ class Utility :
         
         print('Finished for species: ' + organism_name)
         
-        result_df = pd.DataFrame(results, columns=['species_entrez_id', 'human_entrez_id', 'species_specific_geneid_type', 'species_specific_geneid', 'match_confidence', 'result_best_score', 'result_best_score_rev', 'result_symbol'])
+        result_df = pd.DataFrame(results, columns=['kinase_type', 'species_entrez_id', 'human_entrez_id', 'species_specific_geneid_type', 'species_specific_geneid', 'match_confidence', 'result_best_score', 'result_best_score_rev', 'result_symbol'])
         
         result_df['species_entrez_id'] = result_df['species_entrez_id'].astype(int) 
         result_df['human_entrez_id'] = result_df['human_entrez_id'].astype(int)
-        result_df['kinase_type'] = kinase_type
-        
+                
         return result_df
         
         #result_df.to_csv(output_file, sep='\t', index=False)
@@ -434,10 +450,7 @@ if __name__ == '__main__' :
         output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
         if not os.path.exists(output_file):
             print(f'Building ortholog database for {organism_name}')
-            df_st =Utility.build_ortholog_database_for_organism(human_entrez_st_ids, organism_name, taxon_id, proteome_id, 'ST', threads=threads)
-            df_y = Utility.build_ortholog_database_for_organism(human_entrez_y_ids, organism_name, taxon_id, proteome_id, 'Y', threads=threads)
-            
-            df_final = pd.concat([df_st, df_y], ignore_index=True)
+            df_final =Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, proteome_id,threads=threads)            
             df_final.to_csv(output_file, sep='\t', index=False)
         else :
             print(f'Ortholog database for {organism_name} already exists')
