@@ -62,7 +62,7 @@ class Utility :
         response = requests.post(url, data=params)
 
         if not response.ok:
-            print('Server responded:', response.status_code)
+            print('UniProt job server responded:', response.status_code)
             print(response.text)
             return None
         else :
@@ -78,24 +78,36 @@ class Utility :
         url = url + job_id
 
         for i in range(max_tries):
-            response = requests.get(url)
-            if response.ok:
-                result =  response.json()
-                id_mapping_df = pd.DataFrame.from_records(data=result['results'])
-                if(id_mapping_df.empty):
-                    return {}
-                id_mapping_df.columns = ['from', 'to']
-                id_mapping_group_df = id_mapping_df.groupby('from')['to'].apply(list)
-                return id_mapping_group_df.to_dict()
-                
-            elif exponential_backoff:
-                time.sleep(2**i)
-            else:
-                time.sleep(1)
-
-        print('Server responded:', response.status_code)
-        print(response.text)
-        return None
+            response = None
+            try: 
+                response = requests.get(url)
+            except requests.ConnectTimeout:
+                print('Connection timeout')
+            except requests.ConnectionError:
+                print('Connection error with UniProt, waiting for 60 seconds')
+                time.sleep(60)
+            if response == None or not response.ok:
+                if response != None:
+                    print('UniProt map server responded:', response.status_code)
+                    print(response.text)
+                if exponential_backoff:
+                    time.sleep(2**i)
+                else:
+                    time.sleep(1)
+            else :
+                break
+            print(f'Try {i+1}')
+        if response == None or not response.ok:
+            print('Failed to get mapping results from UniProt, check connection')
+            return {}
+        
+        result =  response.json()
+        id_mapping_df = pd.DataFrame.from_records(data=result['results'])
+        if(id_mapping_df.empty):
+            return {}
+        id_mapping_df.columns = ['from', 'to']
+        id_mapping_group_df = id_mapping_df.groupby('from')['to'].apply(list)
+        return id_mapping_group_df.to_dict()
 
     @staticmethod
     def get_orthologs(gene : str,
@@ -117,11 +129,11 @@ class Utility :
             except requests.ConnectTimeout:
                 print('Connection timeout')
             except requests.ConnectionError:
-                print('Connection error, waiting for 60 seconds')
+                print('Connection error with DIOPT, waiting for 60 seconds')
                 time.sleep(60)
             if response == None or not response.ok:
                 if response != None:
-                    print('Server responded:', response.status_code)
+                    print('DIOPT server responded:', response.status_code)
                     print(response.text)
                 if exponential_backoff:
                     time.sleep(2**i)
@@ -129,6 +141,9 @@ class Utility :
                     time.sleep(1)
             else :
                 break
+        if response == None or not response.ok:
+            print('Failed to get orthologs from DIOPT, check connection')
+            return [(-1, None, None, None, None, None, None)]
 
         confidence_filter = Utility.__map_confidence[confidence]
                         
@@ -145,6 +160,9 @@ class Utility :
                 result_confidence = Utility.__map_confidence[id_block[match]['confidence']]
                 #result_symbol = id_block[match]['symbol']
                 result_symbol = result['search_details']['gene_details'][0]['symbol']
+                if species_specific:
+                        species_specific_geneid_type = result['search_details']['gene_details'][0]['species_specific_geneid_type']
+                        species_specific_geneid = result['search_details']['gene_details'][0]['species_specific_geneid']
                 if best_score and result_best_score == 'No':
                     best_match = -1
                     #print('score')
@@ -156,11 +174,8 @@ class Utility :
                     #print(f'confidence: {match_confidence}')
                     best_match = -1
                 if best_match > 0:
-                    species_specific_geneid_type = None
-                    species_specific_geneid = None
-                    if species_specific:
-                        species_specific_geneid_type = id_block[match]['species_specific_geneid_type']
-                        species_specific_geneid = id_block[match]['species_specific_geneid']
+                    #species_specific_geneid_type = None
+                    #species_specific_geneid = None
                     #print('match')
                     matches.append((best_match, species_specific_geneid_type, species_specific_geneid, match_confidence, result_best_score == 'Yes', result_best_score_rev == 'Yes', result_symbol))
             if len(matches) == 0:
@@ -201,6 +216,7 @@ class Utility :
 
         #get the entrez ids of the uniprot ids
         uniprot_to_entrez_job = Utility.make_map_ids_job(uniprot_ids, 'UniProtKB_AC-ID', 'GeneID')
+        time.sleep(3)
         uniprot_to_entrez_dict = Utility.get_map_ids_results(uniprot_to_entrez_job, max_tries=10)
 
         #create a dict from entrez id to uniprot id
@@ -296,7 +312,7 @@ class Utility :
         
         print('Finished for species: ' + organism_name)
         
-        result_df = pd.DataFrame(results, columns=['kinase_type', 'species_entrez_id', 'human_entrez_id', 'species_specific_geneid_type', 'species_specific_geneid', 'match_confidence', 'result_best_score', 'result_best_score_rev', 'result_symbol'])
+        result_df = pd.DataFrame(results, columns=['kinase_type', 'species_entrez_id', 'human_entrez_id', 'species_specific_geneid_type', 'species_specific_geneid', 'match_confidence', 'result_best_score', 'result_best_score_rev', 'symbol'])
         
         result_df['species_entrez_id'] = result_df['species_entrez_id'].astype(int) 
         result_df['human_entrez_id'] = result_df['human_entrez_id'].astype(int)
@@ -316,7 +332,7 @@ class Utility :
         df = pd.read_csv(ortholog_file, sep='\t')
         df['kinase_name'] = df['human_entrez_id'].map(entrez_to_human_kinase_dict)
         df['organism'] = organism
-        df['geneid_type'] = 'GeneID'
+        df['gene_id_type'] = 'GeneID'
         df['gene_id'] = df['species_entrez_id']
         confidence = Utility.__map_confidence[match_confidence]
         df = df[df['match_confidence'] >= confidence]
@@ -324,9 +340,27 @@ class Utility :
             df = df[df['result_best_score']]
         if result_best_score_rev:
             df = df[df['result_best_score_rev']]
-        df.drop(columns=['species_specific_geneid', 'human_entrez_id', 'species_specific_geneid_type', 'species_entrez_id', 'match_confidence', 'result_best_score', 'result_best_score_rev'], inplace=True)
+        #df.drop(columns=['species_specific_geneid', 'human_entrez_id', 'species_specific_geneid_type', 'species_entrez_id', 'match_confidence', 'result_best_score', 'result_best_score_rev'], inplace=True)
 
-        df = df[['organism', 'kinase_name', 'kinase_type', 'geneid_type', 'gene_id', 'result_symbol']]
+        df_entrez = df[['organism', 'kinase_name', 'kinase_type', 'gene_id_type', 'gene_id', 'symbol']].copy()
+        df_specific = df[['organism', 'kinase_name', 'kinase_type', 'species_specific_geneid_type', 'species_specific_geneid', 'symbol']].copy()
+        
+        
+        #rename species_specific_geneid_type to geneid_type and species_specific_geneid to gene_id in df_specific
+        df_specific.rename(columns={'species_specific_geneid_type': 'gene_id_type', 'species_specific_geneid': 'gene_id'}, inplace=True)
+        
+        df = pd.concat([df_entrez, df_specific])
+        
+        #remove rows with NaN values in gene_id or geneid_type
+        df = df.dropna(subset=['gene_id', 'gene_id_type'])
+        
+        #remove rows with empty strings in gene_id or geneid_type
+        df = df[(df['gene_id'] != '') & (df['gene_id_type'] != '')]
+        
+        #remove rows with '-' in gene_id or geneid_type
+        df = df[(df['gene_id'] != '-') & (df['gene_id_type'] != '-')]
+        
+        
         df.to_csv(output_file, sep='\t', index=False)
 
     @staticmethod
@@ -336,7 +370,7 @@ class Utility :
             return df_copy, set()
         
 
-        df_copy = df[df['geneid_type'] == original_geneid_type].copy()
+        df_copy = df[df['gene_id_type'] == original_geneid_type].copy()
         #convert gene_id column to str
         df_copy['gene_id'] = df_copy['gene_id'].astype(str)
 
@@ -350,6 +384,7 @@ class Utility :
         genes_to_map = {g for k in unmapped_kinases for g in kinase_to_gene_id_dict[k]}
 
         gene_ids_job = Utility.make_map_ids_job(genes_to_map, original_geneid_type, geneid_type)
+        time.sleep(3)
         gene_ids_dict = Utility.get_map_ids_results(gene_ids_job)
 
         unmapped_kinases = {k for k in unmapped_kinases if all(g not in gene_ids_dict or len(gene_ids_dict[g]) == 0 for g in kinase_to_gene_id_dict[k])}
@@ -358,11 +393,93 @@ class Utility :
         del df_copy
         df_new['gene_id'] = df_new['gene_id'].map(gene_ids_dict)
         df_new = df_new[~df_new['gene_id'].isnull()]
-        df_new['geneid_type'] = geneid_type
+        df_new['gene_id_type'] = geneid_type
 
         df_new = df_new.explode('gene_id').reset_index(drop=True)
 
         return df_new, unmapped_kinases
+    
+    @staticmethod
+    def get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot) :
+        st_kinases_df = pd.read_excel(ST_matrix_to_uniprot, sheet_name='Table S1 Data')
+        st_kinase_dict = dict(zip(st_kinases_df['Matrix_name'], st_kinases_df['Uniprot id']))
+        
+        y_kinases_df = pd.read_excel(Y_matrix_to_uniprot, sheet_name='Table_S1_Data')
+        
+        #remove rows that have entry in the SUBTYPE column
+        y_kinases_df = y_kinases_df[~y_kinases_df['SUBTYPE'].isnull()]
+        y_kinase_dict = dict(zip(y_kinases_df['MATRIX_NAME'], y_kinases_df['UNIPROT_ID']))
+        
+        st_kinases_uniprot = set(st_kinase_dict.values())
+        y_kinases_uniprot = set(y_kinase_dict.values())
+        
+        return st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict
+    
+    @staticmethod
+    def get_human_kinase_geneIDs(kinases_uniprot : set, kinase_dict : dict) :
+        human_uniprot_to_entrez_job = Utility.make_map_ids_job(kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
+        time.sleep(3)
+        human_kinases_uniprot_to_entrez_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_job)
+        
+        #print the differences between the uniprot ids and the ids that were mapped
+        unmapped_ids = kinases_uniprot - set(human_kinases_uniprot_to_entrez_dict.keys())
+        print(f'The following kinases were not mapped to a GeneID: {",".join(unmapped_ids)}')
+        
+        uniprot_to_human_kinase_dict = {v: k for k, v in kinase_dict.items()}
+        
+        human_kinases_entrez_to_uniprot_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_dict.items() for e in entrez_id_list}
+
+        human_entrez_ids = set(human_kinases_entrez_to_uniprot_dict.keys())
+        
+        return human_kinases_uniprot_to_entrez_dict, human_kinases_entrez_to_uniprot_dict, uniprot_to_human_kinase_dict, human_entrez_ids, unmapped_ids
+    
+    @staticmethod
+    def build_human_kinase_database(output_file : str) :
+        ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
+        ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
+
+        Y_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM3_ESM.xlsx'
+
+        ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
+        Y_matrix_to_uniprot = os.path.join(data_dir,'Y-Kinases_to_Uniprot.xlsx')
+
+        if not os.path.exists(ST_matrix_to_uniprot):
+            Utility.download_file(ST_matrix_to_uniprot_url, ST_matrix_to_uniprot)
+
+        if not os.path.exists(Y_matrix_to_uniprot):
+            Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
+            
+        st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict = Utility.get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot)
+        
+        human_kinases_uniprot_to_entrez_st_dict,_,_,_,unmapped_st = Utility.get_human_kinase_geneIDs(st_kinases_uniprot, st_kinase_dict)
+        
+        human_kinases_uniprot_to_entrez_y_dict,_,_,_,unmapped_y = Utility.get_human_kinase_geneIDs(y_kinases_uniprot, y_kinase_dict)
+        
+        st_kinase_geneIDs = [('ST', 'human', k, 'GeneID', g, k) for k, u in st_kinase_dict.items() if u not in unmapped_st for g in human_kinases_uniprot_to_entrez_st_dict[u]]
+        st_kinase_UniProt = [('ST', 'human', k, 'UniProtKB', u, k) for k, u in st_kinase_dict.items()]
+        
+        y_kinase_geneIDs = [('Y', 'human', k, 'GeneID', g, k) for k, u in y_kinase_dict.items() if u not in unmapped_y for g in human_kinases_uniprot_to_entrez_y_dict[u]]
+        y_kinase_UniProt = [('Y', 'human', k, 'UniProtKB', u, k) for k, u in y_kinase_dict.items()]
+        
+        df_data = st_kinase_geneIDs + y_kinase_geneIDs + st_kinase_UniProt + y_kinase_UniProt
+        
+        df = pd.DataFrame(df_data, columns=['kinase_type', 'organism', 'kinase_name', 'gene_id_type', 'gene_id', 'symbol'])
+        
+        #sort df by kinase_type, gene_id_type, and kinase_name
+        df = df.sort_values(by=['kinase_type', 'gene_id_type', 'kinase_name'])
+        
+        df.to_csv(output_file, sep='\t', index=False)
+    
+    @staticmethod
+    def load_human_kinases_database(human_kinases_database_file : str, kinase_type : str = 'ST') :
+        df = pd.read_csv(human_kinases_database_file, sep='\t')
+        df = df[df['kinase_type'] == kinase_type]
+        
+        df_uniprot = df[df['gene_id_type'] == 'UniProtKB']
+        uniprot_kinase_dict = dict(zip(df_uniprot['kinase_name'], df_uniprot['gene_id']))
+        kinases_entrez_to_uniprot_dict = dict(zip(df['gene_id'], df['kinase_name']))
+        
+        return uniprot_kinase_dict, kinases_entrez_to_uniprot_dict
         
 if __name__ == '__main__' :
     data_dir = './data'
@@ -389,6 +506,7 @@ if __name__ == '__main__' :
     johnson_Y_matrices_file = os.path.join(data_dir,'Y-Kinases.xlsx')
     Utility.rearrange_matrices(johnson_Y_matrices_original_file, sheet_name = 'tyrosine_all_norm_scaled_matric', pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4', '5'], output_file = johnson_Y_matrices_file)
 
+    
     ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
     ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
 
@@ -420,59 +538,33 @@ if __name__ == '__main__' :
     if not os.path.exists(tyrosine_background_original_file):
         Utility.download_file(tyrosine_background_url, tyrosine_background_original_file)
 
-    st_kinases_df = pd.read_excel(ST_matrix_to_uniprot, sheet_name='Table S1 Data')
-    st_kinase_dict = dict(zip(st_kinases_df['Matrix_name'], st_kinases_df['Uniprot id']))
-    
-    y_kinases_df = pd.read_excel(Y_matrix_to_uniprot, sheet_name='Table_S1_Data')
-    
-    #remove rows that have entry in the SUBTYPE column
-    y_kinases_df = y_kinases_df[~y_kinases_df['SUBTYPE'].isnull()]
-    y_kinase_dict = dict(zip(y_kinases_df['MATRIX_NAME'], y_kinases_df['UNIPROT_ID']))
-    
-    st_kinases_uniprot = set(st_kinase_dict.values())
-    y_kinases_uniprot = set(y_kinase_dict.values())
 
+    human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
+    if not os.path.exists(human_kinases_database_file):
+        Utility.build_human_kinase_database(human_kinases_database_file)
+    
+    
+    st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict = Utility.get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot)
+    
+    human_kinases_uniprot_to_entrez_st_dict,\
+    human_kinases_entrez_to_uniprot_st_dict,\
+    uniprot_to_human_kinase_st_dict,\
+    human_entrez_st_ids,\
+    unmapped_st = Utility.get_human_kinase_geneIDs(st_kinases_uniprot, st_kinase_dict)
+    
+    human_kinases_uniprot_to_entrez_y_dict,\
+    human_kinases_entrez_to_uniprot_y_dict,\
+    uniprot_to_human_kinase_y_dict,\
+    human_entrez_y_ids,\
+    unmapped_st = Utility.get_human_kinase_geneIDs(y_kinases_uniprot, y_kinase_dict)
+    
+    orthologs_dir = 'orthologs'
+    
     #which kinases are in both sets
     dual_specificity_kinases = st_kinases_uniprot & y_kinases_uniprot
 
     print('Dual specificity kinases')
     print(dual_specificity_kinases)
-    
-    #human_kinase_dict = {**st_kinase_dict, **y_kinase_dict}
-
-    
-    #human_kinases_uniprot = st_kinases_uniprot | y_kinases_uniprot
-    #human_uniprot_to_entrez_job = Utility.make_map_ids_job(human_kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
-    
-    #human_kinases_uniprot_to_entrez_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_job)
-    
-    #for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_dict.items():
-    #    if len(entrez_id_list) != 1:
-    #        print('Warning: entrez id list size not 1')
-    #        print(uniprot)
-    #        print(entrez_id_list)
-            
-    #uniprot_to_human_kinase = {v: k for k, v in human_kinase_dict.items()}
-    #human_entrez_to_uniprot_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_dict.items() for e in entrez_id_list}
-
-    #human_entrez_ids = set(human_entrez_to_uniprot_dict.keys())
-
-    human_uniprot_to_entrez_st_job = Utility.make_map_ids_job(st_kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
-    human_uniprot_to_entrez_y_job = Utility.make_map_ids_job(y_kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
-    
-    human_kinases_uniprot_to_entrez_st_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_st_job)
-    human_kinases_uniprot_to_entrez_y_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_y_job)
-    
-    uniprot_to_human_kinase_st_dict = {v: k for k, v in st_kinase_dict.items()}
-    uniprot_to_human_kinase_y_dict = {v: k for k, v in y_kinase_dict.items()}
-    
-    human_kinases_entrez_to_uniprot_st_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_st_dict.items() for e in entrez_id_list}
-    human_kinases_entrez_to_uniprot_y_dict = {int(e): uniprot for uniprot, entrez_id_list in human_kinases_uniprot_to_entrez_y_dict.items() for e in entrez_id_list}
-
-    human_entrez_st_ids = set(human_kinases_entrez_to_uniprot_st_dict.keys())
-    human_entrez_y_ids = set(human_kinases_entrez_to_uniprot_y_dict.keys())
-    
-    orthologs_dir = 'orthologs'
     
     if not os.path.exists(orthologs_dir):
         os.makedirs(orthologs_dir)
@@ -491,13 +583,10 @@ if __name__ == '__main__' :
         output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
         if not os.path.exists(output_file):
             print(f'Building ortholog database for {organism_name}')
-            df_final =Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, proteome_id,threads=threads)            
+            df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, proteome_id,threads=threads)            
             df_final.to_csv(output_file, sep='\t', index=False)
         else :
             print(f'Ortholog database for {organism_name} already exists')
-
-    uniprot_to_human_kinase_st_dict = {u : k for k,u in st_kinase_dict.items()}
-    uniprot_to_human_kinase_y_dict = {u : k for k,u in y_kinase_dict.items()}
 
     entrez_to_human_kinase_st_dict = {e : uniprot_to_human_kinase_st_dict[u] for e,u in human_kinases_entrez_to_uniprot_st_dict.items()}
     entrez_to_human_kinase_y_dict = {e : uniprot_to_human_kinase_y_dict[u] for e,u in human_kinases_entrez_to_uniprot_y_dict.items()}
@@ -509,44 +598,38 @@ if __name__ == '__main__' :
         output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
         Utility.refactor_ortholog_file(ortholog_file, organism_name, entrez_to_human_kinase_dict, output_file)
     
-    supported_ids_dict = {
-        'mouse'     :   'MGI',
-        'fly'       :   'FlyBase',
-        'worm'      :   'WormBase',
-        'yeast'     :   'SGD',
-        'zebrafish' :   'ZFIN'
-    }
-
-
-    #Gene ID 	Entrez Zebrafish Gene ID 	Entrez Human Gene ID 	ZFIN Gene Symbol 	Affected Structure or Process 1 subterm OBO ID 	Affected Structure or Process 1 subterm name 	Post-Composed Relationship ID 	Post-Composed Relationship Name 	Affected Structure or Process 1 superterm OBO ID 	Affected Structure or Process 1 superterm name 	Phenotype Keyword OBO ID 	Phenotype Quality 	Phenotype Tag 	Affected Structure or Process 2 subterm OBO ID 	Affected Structure or Process 2 subterm name 	Post-Composed Relationship ID 	Post-Composed Relationship Name 	Affected Structure or Process 2 superterm OBO ID 	Affected Structure or Process 2 superterm name
-    #https://zfin.org/downloads/pheno_fish.txt
-    special_mapping = {'zebrafish' : None}
-
-
+    
+    
     for organism_name, _, _, in arguments :
-        print(organism_name)
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_final.tsv')
+        if os.path.exists(output_file):
+            print(f'Final ortholog database for {organism_name} already exists')
+            continue
+        
         refactored_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
         df = pd.read_csv(refactored_file, sep='\t')
-        df_uniprot, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB')
-
-        print(df_uniprot[df_uniprot['kinase_name'] == 'ZAK'])
-
-        df_special, special_unmapped = Utility.add_supported_id_by_geneid(df_uniprot, supported_ids_dict[organism_name], 'UniProtKB')
-        print(special_unmapped)
-
-        #try with GeneID if there are still unmapped ids
-        #if (len(special_unmapped) > 0):
-        #    df_special2, _ = Utility.add_supported_id_by_geneid(df, supported_ids_dict[organism_name],'GeneID', special_unmapped)
-        #    if(len(df_special2) > 0):
-        #        df_special = pd.concat([df_special, df_special2])
         
-        #if there are uniprot unmapped ids, try with special
-        print(uniprot_unmapped)
-        if (len(uniprot_unmapped) > 0):
-            df_uniprot2, _ = Utility.add_supported_id_by_geneid(df_uniprot, 'UniProtKB', supported_ids_dict[organism_name], uniprot_unmapped)
-            if(len(df_uniprot2) > 0):
-                df_uniprot = pd.concat([df_uniprot, df_uniprot2])
+        unique_geneid_types = df['gene_id_type'].unique()
+        specific_geneid_types = unique_geneid_types[unique_geneid_types != 'GeneID']
         
-        df_final = pd.concat([df, df_uniprot, df_special])
-
-        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_final.tsv')
+        df_uniprot, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', 'GeneID')
+        for geneid_type in specific_geneid_types :
+            if len(uniprot_unmapped) > 0:
+                df_uniprot2, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', geneid_type, uniprot_unmapped)
+                if(len(df_uniprot2) > 0):
+                    df_uniprot = pd.concat([df_uniprot, df_uniprot2])
+        
+        df_final = pd.concat([df, df_uniprot])
+        
+        print(df_final.head())
+        #sort by organism, gene_id_type, kinase_name
+        df_final = df_final.sort_values(by=['organism', 'gene_id_type', 'kinase_name'])
+        
+        df_final['symbol'] = df_final['symbol'].astype(str)
+        df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(set).reset_index()
+        df_group['symbol'] = df_group['symbol'].apply(lambda x: list(x))
+        df_group['symbol'] = df_group['symbol'].apply(lambda x: sorted(x))
+        df_group['symbol'] = df_group['symbol'].apply(lambda x: '+'.join(x))
+        df_final = df_group.explode('gene_id')
+        
+        df_final.to_csv(output_file, sep='\t', index=False)
