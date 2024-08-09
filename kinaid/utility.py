@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import numpy as np
 from mpire import WorkerPool
+from .matching import PWM_Matrices, Scoring, PeptideBackground
 
 class Utility :
     __MAPPING_API = 'https://rest.uniprot.org/idmapping/run/'
@@ -434,7 +435,7 @@ class Utility :
         return human_kinases_uniprot_to_entrez_dict, human_kinases_entrez_to_uniprot_dict, uniprot_to_human_kinase_dict, human_entrez_ids, unmapped_ids
     
     @staticmethod
-    def build_human_kinase_database(output_file : str) :
+    def build_human_kinase_database(data_dir : str, output_file : str) :
         ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
         ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
 
@@ -475,15 +476,20 @@ class Utility :
         df = pd.read_csv(human_kinases_database_file, sep='\t')
         df = df[df['kinase_type'] == kinase_type]
         
-        df_uniprot = df[df['gene_id_type'] == 'UniProtKB']
-        uniprot_kinase_dict = dict(zip(df_uniprot['kinase_name'], df_uniprot['gene_id']))
-        kinases_entrez_to_uniprot_dict = dict(zip(df['gene_id'], df['kinase_name']))
+        df_uniprot = df[df['gene_id_type'] == 'UniProtKB'].copy()
+        df_entrez = df[df['gene_id_type'] == 'GeneID'].copy()
+        df_entrez['gene_id'] = df_entrez['gene_id'].astype(int)
+        kinase_to_uniprot_dict = dict(zip(df_uniprot['kinase_name'], df_uniprot['gene_id']))
+        entrez_to_kinase_dict = dict(zip(df_entrez['gene_id'], df_entrez['kinase_name']))
         
-        return uniprot_kinase_dict, kinases_entrez_to_uniprot_dict
+        return kinase_to_uniprot_dict, entrez_to_kinase_dict
         
-if __name__ == '__main__' :
+def DefaultConfiguration() :
     data_dir = './data'
     threads = 8
+    
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
 
     johnson_ST_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM4_ESM.xlsx'
     johnson_ST_matrices_original_file = os.path.join(data_dir,'johnson_ST_matrices.xlsx')
@@ -538,25 +544,39 @@ if __name__ == '__main__' :
     if not os.path.exists(tyrosine_background_original_file):
         Utility.download_file(tyrosine_background_url, tyrosine_background_original_file)
 
+    ST_matrices = PWM_Matrices(johnson_ST_matrices_file)
+    ST_matrices.add_densitometry(densitometry_file)
+
+    Y_matrices = PWM_Matrices(johnson_Y_matrices_file, ignore_suffix='_TYR')
+
+    st_scoring = Scoring(ST_matrices)
+    y_scoring = Scoring(Y_matrices)
+    
+    ochoa_background_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
+
+    if not os.path.exists(ochoa_background_file) :
+        PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring, ochoa_background_file)
+
+
+    tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
+    tyrosine_background_file = os.path.join(data_dir, 'johnson_tyrosine_background_wfav.tsv')
+
+    if not os.path.exists(tyrosine_background_file) :
+        PeptideBackground.background_factory(tyrosine_background_original_file, 'Annotation - Canonical only', y_scoring, tyrosine_background_file)
 
     human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
     if not os.path.exists(human_kinases_database_file):
-        Utility.build_human_kinase_database(human_kinases_database_file)
+        Utility.build_human_kinase_database(data_dir, human_kinases_database_file)
     
     
-    st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict = Utility.get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot)
+    kinase_to_uniprot_st_dict, entrez_to_kinase_st_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'ST')
+    kinase_to_uniprot_y_dict, entrez_to_kinase_y_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'Y')
     
-    human_kinases_uniprot_to_entrez_st_dict,\
-    human_kinases_entrez_to_uniprot_st_dict,\
-    uniprot_to_human_kinase_st_dict,\
-    human_entrez_st_ids,\
-    unmapped_st = Utility.get_human_kinase_geneIDs(st_kinases_uniprot, st_kinase_dict)
+    st_kinases_uniprot = set(kinase_to_uniprot_st_dict.values())
+    y_kinases_uniprot = set(kinase_to_uniprot_y_dict.values())
     
-    human_kinases_uniprot_to_entrez_y_dict,\
-    human_kinases_entrez_to_uniprot_y_dict,\
-    uniprot_to_human_kinase_y_dict,\
-    human_entrez_y_ids,\
-    unmapped_st = Utility.get_human_kinase_geneIDs(y_kinases_uniprot, y_kinase_dict)
+    human_entrez_st_ids = set(entrez_to_kinase_st_dict.keys())
+    human_entrez_y_ids = set(entrez_to_kinase_y_dict.keys())
     
     orthologs_dir = 'orthologs'
     
@@ -588,10 +608,7 @@ if __name__ == '__main__' :
         else :
             print(f'Ortholog database for {organism_name} already exists')
 
-    entrez_to_human_kinase_st_dict = {e : uniprot_to_human_kinase_st_dict[u] for e,u in human_kinases_entrez_to_uniprot_st_dict.items()}
-    entrez_to_human_kinase_y_dict = {e : uniprot_to_human_kinase_y_dict[u] for e,u in human_kinases_entrez_to_uniprot_y_dict.items()}
-
-    entrez_to_human_kinase_dict = {**entrez_to_human_kinase_st_dict, **entrez_to_human_kinase_y_dict}
+    entrez_to_human_kinase_dict = {**entrez_to_kinase_st_dict, **entrez_to_kinase_y_dict}
 
     for organism_name, taxon_id, proteome_id in arguments :
         ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
@@ -621,7 +638,7 @@ if __name__ == '__main__' :
         
         df_final = pd.concat([df, df_uniprot])
         
-        print(df_final.head())
+        #print(df_final.head())
         #sort by organism, gene_id_type, kinase_name
         df_final = df_final.sort_values(by=['organism', 'gene_id_type', 'kinase_name'])
         
@@ -633,3 +650,7 @@ if __name__ == '__main__' :
         df_final = df_group.explode('gene_id')
         
         df_final.to_csv(output_file, sep='\t', index=False)
+        
+if __name__ == '__main__' :
+    DefaultConfiguration()
+    print('Configuration complete')

@@ -2,6 +2,8 @@ import pandas as pd
 import math
 from bisect import bisect_left
 from typing import List
+from tqdm.notebook import tqdm_notebook
+import tqdm
 
 class PWM_Matrices : 
 
@@ -184,6 +186,45 @@ class Scoring:
         return self._kinase_names
 
 class PeptideBackground :
+    @staticmethod
+    def background_factory(background_file : str,
+                           sheet_name : str,
+                           scoring : Scoring,
+                           output_file : str,
+                           progress : str = None) :
+    
+        #read the original background file
+        background_df = pd.read_excel(background_file, engine='calamine', sheet_name=sheet_name, usecols=['SITE_+/-7_AA'])
+
+
+        background_df['clean_seq'] = background_df['SITE_+/-7_AA'].apply(scoring.clean_sequence)
+
+        background_df = background_df.drop(columns=['SITE_+/-7_AA'])
+        
+        kinases = scoring.get_kinase_names()
+
+        kinases_loop = {None:kinases, 'notebook':tqdm_notebook(kinases), 'terminal':tqdm(kinases)}[progress]
+        
+        scores_df = pd.concat([
+            pd.Series(
+                background_df['clean_seq'].apply(
+                    lambda x: scoring.score_peptide(
+                        x,
+                        kinase=k,
+                        mode='as_is',
+                        log_score=False
+                    )
+                ),
+                index = background_df.index,
+                name = k
+            ) 
+            for k in kinases_loop
+        ], axis =1)
+        scores_df = pd.concat([background_df, scores_df], axis=1)
+        scores_df.to_csv(output_file, sep='\t', index=True, index_label='sequence')
+        
+        return PeptideBackground(output_file)
+    
     def __init__(self, background_file : str) :
         df = pd.read_csv(background_file, sep = '\t', usecols=lambda x: x not in {'sequence', 'clean_seq'})
         self._background_size = len(df)
@@ -222,3 +263,17 @@ class Match :
     
     def get_matched_kinases(self, sequence : str, threshold = 90.0, mode : str = None, low_score_skip : bool = False) :
         return [k for k in self._kinase_names if self.get_percentile(sequence, k, mode, low_score_skip) > threshold]
+    
+class MatchWithMapping :
+    def __init__(self, matching : Match, mapping : dict) :
+        self._matching = matching
+        self._mapping = mapping
+        self._mapped_kinase_names = list(mapping.values())
+        if not all(k in matching._kinase_names for k in self._mapped_kinase_names) :
+            raise ValueError('Invalid kinase names in mapping')
+    
+    def get_percentiles_for_kinase(self, sequences : List[str], kinase_symbol : str, mode : str = None, low_score_skip : bool = False) :
+        return [self._matching.get_percentile(s, self._mapping[kinase_symbol], mode, low_score_skip) for s in sequences]
+    
+    def get_percentiles_for_all_kinases(self, sequences : List[str], mode : str = None, low_score_skip : bool = False) :
+        return {sk:self.get_percentiles_for_kinase(sequences, hk, mode, low_score_skip) for sk,hk in self._mapping}
