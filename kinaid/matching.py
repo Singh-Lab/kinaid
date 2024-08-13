@@ -1,12 +1,38 @@
 import pandas as pd
 import math
 from bisect import bisect_left
-from typing import List
+from typing import List, Set, Dict
 from tqdm.notebook import tqdm_notebook
-import tqdm
+from tqdm import tqdm
+import numpy as np
 
-class PWM_Matrices : 
+class PWM_Matrices :
+    @staticmethod
+    def rearrange_matrices (matrices_file : str = './out/johnson_ST_matrices.xlsx',
+                            sheet_name : str = 'ser_thr_all_norm_scaled_matrice', 
+                        output_file : str = './out/ST-Kinases.xlsx', 
+                        pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4'],
+                        remove_suffix = None):
+        ae_df = pd.read_excel(matrices_file, engine='openpyxl', sheet_name=sheet_name)
+        #rename first column to Kinase
+        ae_df.rename(columns={ae_df.columns[0]: 'Kinase'}, inplace=True)
+        ae_df.set_index('Kinase', inplace=True)
 
+        res = ['P','G','A','C','S','T','V','I','L','M','F','Y','W','H','K','R','Q','N','D','E','s','t','y']
+
+        kinase_matrices = {}
+        for k,row in ae_df.iterrows() :
+            kinase = k if remove_suffix is None else k.replace(remove_suffix, '')
+            probs = row.to_numpy()
+            prob_matrix = np.reshape(probs, (len(pos),len(res)))
+            prob_matrix_t = prob_matrix.transpose()
+            kdf = pd.DataFrame(prob_matrix_t, columns=pos, index=res)
+            kdf.index.name = 'AA'
+            kinase_matrices[kinase] = kdf
+
+        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+            any(df.to_excel(writer, sheet_name=k) for k, df in kinase_matrices.items())
+    
     @staticmethod
     def score_peptide_with_matrix(sequence : str, pwm : dict, cols : list, favorability : dict = None, log_score : bool = False) -> float:
         if (len(sequence) - 1) != len(cols) :
@@ -29,12 +55,9 @@ class PWM_Matrices :
         else :
             return math.prod(scores)
         
-    def __init__(self, pwm_xlsx : str, ignore_suffix : str = '', debug : bool = False) :
+    def __init__(self, pwm_xlsx : str, debug : bool = False) :
         pwm_excel = pd.ExcelFile(pwm_xlsx, engine = 'openpyxl')
-        if ignore_suffix != '' :
-            self._kinase_names = [k for k in pwm_excel.sheet_names if not k.endswith(ignore_suffix)]
-        else :
-            self._kinase_names = pwm_excel.sheet_names
+        self._kinase_names = pwm_excel.sheet_names
             
         pwm_dfs = {k:pwm_excel.parse(k) for k in self._kinase_names}
         
@@ -113,32 +136,39 @@ class Scoring:
     __valid_phosphorylation_sites__ = {'S', 'T', 'Y', 's', 't', 'y'}
     
     @staticmethod
-    def get_sequence_format(sequence : str) -> str:
+    def get_sequence_format(sequence : str, index : int = -1) -> str:
         # * format - * is right of the phosphorylated site and only exists once
         if '*' in sequence :
             split_sequence = sequence.split('*')
             if len(split_sequence) > 2 :
-                raise ValueError('Invalid sequence format')
+                raise ValueError(f'Invalid sequence format @ {index+1}: too many stars')
             if split_sequence[0][-1] not in Scoring.__valid_phosphorylation_sites__ :
-                raise ValueError('Invalid sequence format')
+                raise ValueError(f'Invalid sequence format @ {index+1}: invalid phosphorylated site')
             return 'star'
         # center format - the center position is the phosphorylated site
         elif sequence[len(sequence) // 2] in Scoring.__valid_phosphorylation_sites__:
             return 'center'
         else:
-            raise ValueError('Invalid sequence format')
+            raise ValueError(f'Invalid sequence format @ {index+1}: invalid phosphorylated site')
     
-
-    def __init__(self, pwm_matrices : PWM_Matrices) :
-        self._pwm_matrices = pwm_matrices
-        self._kinase_names = pwm_matrices._kinase_names
-        self._has_st_favorability = pwm_matrices._has_favorability
-        self._range = pwm_matrices._range
-
-    def clean_sequence(self, sequence : str, mode = None) -> str:
+    
+    @staticmethod
+    def get_phosphorylation_site(sequence : str, mode : str = None) -> str :
         if mode is None:
             mode = Scoring.get_sequence_format(sequence)
         
+        if mode == 'star' :
+            return sequence.split('*')[0][-1]
+        elif mode == 'center' :
+            return sequence[len(sequence) // 2]
+        else :
+            raise ValueError('Invalid sequence format')
+        
+    @staticmethod
+    def split_by_phosphorylation_site(sequence : str, mode : str = None) -> str:
+        if mode is None:
+            mode = Scoring.get_sequence_format(sequence)
+            
         split_sequence = ''
         phosphorylated_site = ''
         if mode == 'star':
@@ -152,12 +182,23 @@ class Scoring:
             split_sequence = [sequence[:len(sequence) // 2], sequence[len(sequence) // 2 + 1:]]
             phosphorylated_site = sequence[len(sequence) // 2]
 
-
-
         if phosphorylated_site not in Scoring.__valid_phosphorylation_sites__:
             raise ValueError(f'Invalid phosphorylated site: {phosphorylated_site}')
 
         phosphorylated_site = phosphorylated_site.upper()
+        
+        return phosphorylated_site, split_sequence
+    
+    def __init__(self, pwm_matrices : PWM_Matrices) :
+        self._pwm_matrices = pwm_matrices
+        self._kinase_names = pwm_matrices._kinase_names
+        self._has_st_favorability = pwm_matrices._has_favorability
+        self._range = pwm_matrices._range
+
+    
+    def clean_sequence(self, sequence : str, mode = None) -> str:
+        
+        phosphorylated_site, split_sequence = Scoring.split_by_phosphorylation_site(sequence, mode)
 
         left_side_len = 0 - self._range[0]
         right_side_len = self._range[1]
@@ -203,7 +244,14 @@ class PeptideBackground :
         
         kinases = scoring.get_kinase_names()
 
-        kinases_loop = {None:kinases, 'notebook':tqdm_notebook(kinases), 'terminal':tqdm(kinases)}[progress]
+        if progress is None :
+            kinases_loop = kinases
+        elif progress == 'notebook' :
+            kinases_loop = tqdm_notebook(kinases)
+        elif progress == 'terminal' :
+            kinases_loop = tqdm(kinases)
+            
+        #kinases_loop = {None:kinases, 'notebook':tqdm_notebook(kinases), 'terminal':tqdm(kinases)}[progress]
         
         scores_df = pd.concat([
             pd.Series(
@@ -261,19 +309,36 @@ class Match :
         percentiles = self.get_percentiles(sequences, mode, low_score_skip)
         return pd.DataFrame(percentiles, index = sequences)
     
-    def get_matched_kinases(self, sequence : str, threshold = 90.0, mode : str = None, low_score_skip : bool = False) :
-        return [k for k in self._kinase_names if self.get_percentile(sequence, k, mode, low_score_skip) > threshold]
+
+class MatchWithMapping(Match) :
     
-class MatchWithMapping :
-    def __init__(self, matching : Match, mapping : dict) :
-        self._matching = matching
+    @staticmethod
+    def get_kinase_matches_for_peptides(num_peptides : int, percentiles : Dict[str, List[float]], match_threshold : float) -> List[List[str]] :
+        return [[k for k,ps in percentiles.items() if ps[i] >= match_threshold] for i in range(num_peptides)]
+    
+    @staticmethod
+    def get_peptide_matches_for_kinases(percentiles : Dict[str, List[float]], match_threshold : float) -> Dict[str, List[int]] :
+        return {k:[i for i,p in enumerate(ps) if p >= match_threshold] for k,ps in percentiles.items()}
+    
+    def __init__(self, scoring : Scoring, background : PeptideBackground, mapping : dict) :
+        super().__init__(scoring, background)
         self._mapping = mapping
         self._mapped_kinase_names = list(mapping.values())
-        if not all(k in matching._kinase_names for k in self._mapped_kinase_names) :
+        if not all(k in scoring._kinase_names for k in self._mapped_kinase_names) :
+            #print(set(scoring._kinase_names) - set(self._mapped_kinase_names))
+            print(scoring._kinase_names)
             raise ValueError('Invalid kinase names in mapping')
     
+    def get_percentile(self, sequence : str, kinase_symbol : str, mode : str = None, low_score_skip : bool = False) :
+        return super().get_percentile(sequence, self._mapping[kinase_symbol], mode, low_score_skip)
+    
     def get_percentiles_for_kinase(self, sequences : List[str], kinase_symbol : str, mode : str = None, low_score_skip : bool = False) :
-        return [self._matching.get_percentile(s, self._mapping[kinase_symbol], mode, low_score_skip) for s in sequences]
+        return [self.get_percentile(s, kinase_symbol, mode, low_score_skip) for s in sequences]
     
     def get_percentiles_for_all_kinases(self, sequences : List[str], mode : str = None, low_score_skip : bool = False) :
-        return {sk:self.get_percentiles_for_kinase(sequences, hk, mode, low_score_skip) for sk,hk in self._mapping}
+        return {sk:self.get_percentiles_for_kinase(sequences, sk, mode, low_score_skip) for sk in self._mapping}
+    
+    def get_percentiles_for_selected_kinases(self, sequences : List[str], selected_kinases : Set[str], mode : str = None, low_score_skip : bool = False) :
+        return {sk:self.get_percentiles_for_kinase(sequences, sk, mode, low_score_skip) for sk in self._mapping if sk in selected_kinases}
+    
+    

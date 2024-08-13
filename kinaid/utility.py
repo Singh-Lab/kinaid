@@ -21,32 +21,7 @@ class Utility :
             with open(filename, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192): 
                     if chunk: 
-                        file.write(chunk)
-
-    @staticmethod
-    def rearrange_matrices (matrices_file : str = './out/johnson_ST_matrices.xlsx',
-                            sheet_name : str = 'ser_thr_all_norm_scaled_matrice', 
-                        output_file : str = './out/ST-Kinases.xlsx', 
-                        pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4']):
-        ae_df = pd.read_excel(matrices_file, engine='openpyxl', sheet_name=sheet_name)
-        #rename first column to Kinase
-        ae_df.rename(columns={ae_df.columns[0]: 'Kinase'}, inplace=True)
-        ae_df.set_index('Kinase', inplace=True)
-
-        res = ['P','G','A','C','S','T','V','I','L','M','F','Y','W','H','K','R','Q','N','D','E','s','t','y']
-
-        kinase_matrices = {}
-        for k,row in ae_df.iterrows() :
-            probs = row.to_numpy()
-            prob_matrix = np.reshape(probs, (len(pos),len(res)))
-            prob_matrix_t = prob_matrix.transpose()
-            kdf = pd.DataFrame(prob_matrix_t, columns=pos, index=res)
-            kdf.index.name = 'AA'
-            kinase_matrices[k] = kdf
-
-        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
-            any(df.to_excel(writer, sheet_name=k) for k, df in kinase_matrices.items())
-        
+                        file.write(chunk)    
     
     @staticmethod
     def make_map_ids_job(list_of_ids : list, from_db : str ='UniProtKB_AC-ID', to_db : str = 'GeneID') -> str:
@@ -189,20 +164,21 @@ class Utility :
                         taxon_id : int,
                         proteome_id : str,
                         canonical_only : bool = False,
-                        proteome_dir : str = 'proteomes'):
+                        proteome_dir : str = 'proteomes',
+                        format : str = 'tsv') -> str:
         if not os.path.exists(proteome_dir):
             os.makedirs(proteome_dir)
         
         canonical = 'con' if canonical_only else 'noncon'
-        filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{canonical}.tsv')
+        filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{canonical}.{format}')
         
         if os.path.exists(filename):
             return filename
         
         if not canonical_only :
-            url = f'https://rest.uniprot.org/uniprotkb/stream?fields=accession%2Creviewed%2Cid%2Cprotein_name&format=tsv&query=%28%28proteome%3A{proteome_id}%29%29'
+            url = f'https://rest.uniprot.org/uniprotkb/stream?fields=accession%2Creviewed%2Cid%2Cprotein_name&format={format}&query=%28%28proteome%3A{proteome_id}%29%29'
         else :
-            url = f'https://rest.uniprot.org/uniprotkb/stream?fields=accession%2Creviewed%2Cid%2Cprotein_name&format=tsv&query=%28%28proteome%3A{proteome_id}%29+AND+reviewed%3Dtrue%29'
+            url = f'https://rest.uniprot.org/uniprotkb/stream?fields=accession%2Creviewed%2Cid%2Cprotein_name&format={format}&query=%28%28proteome%3A{proteome_id}%29+AND+reviewed%3Dtrue%29'
         
         Utility.download_file(url, filename)
         return filename
@@ -401,7 +377,7 @@ class Utility :
         return df_new, unmapped_kinases
     
     @staticmethod
-    def get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot) :
+    def get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot, remove_tyr = True) :
         st_kinases_df = pd.read_excel(ST_matrix_to_uniprot, sheet_name='Table S1 Data')
         st_kinase_dict = dict(zip(st_kinases_df['Matrix_name'], st_kinases_df['Uniprot id']))
         
@@ -410,6 +386,9 @@ class Utility :
         #remove rows that have entry in the SUBTYPE column
         y_kinases_df = y_kinases_df[~y_kinases_df['SUBTYPE'].isnull()]
         y_kinase_dict = dict(zip(y_kinases_df['MATRIX_NAME'], y_kinases_df['UNIPROT_ID']))
+        
+        if remove_tyr:
+            y_kinase_dict = {k.split('_TYR')[0]: u for k, u in y_kinase_dict.items()}
         
         st_kinases_uniprot = set(st_kinase_dict.values())
         y_kinases_uniprot = set(y_kinase_dict.values())
@@ -489,40 +468,46 @@ def DefaultConfiguration() :
     threads = 8
     
     if not os.path.exists(data_dir):
+        print('Creating data directory')
         os.makedirs(data_dir)
 
     johnson_ST_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM4_ESM.xlsx'
     johnson_ST_matrices_original_file = os.path.join(data_dir,'johnson_ST_matrices.xlsx')
 
     if not os.path.exists(johnson_ST_matrices_original_file):
+        print('Downloading ST matrices')
         Utility.download_file(johnson_ST_matrices_url, johnson_ST_matrices_original_file)
         
     johnson_ST_matrices_file = os.path.join(data_dir,'ST-Kinases.xlsx')
-    Utility.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_norm_scaled_matrice', output_file=johnson_ST_matrices_file)
+    if not os.path.exists(johnson_ST_matrices_file):
+        print('Rearranging ST matrices')
+        PWM_Matrices.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_norm_scaled_matrice', output_file=johnson_ST_matrices_file)
 
     densitometry_file = os.path.join(data_dir,'ST-Kinases_densitometry.xlsx')
-    Utility.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_raw_matrices', output_file=densitometry_file)
+    if not os.path.exists(densitometry_file):
+        print('Rearranging densitometry matrices')
+        PWM_Matrices.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_raw_matrices', output_file=densitometry_file)
 
     johnson_Y_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM4_ESM.xlsx'
     johnson_Y_matrices_original_file = os.path.join(data_dir,'johnson_Y_matrices.xlsx')
 
     if not os.path.exists(johnson_Y_matrices_original_file):
+        print('Downloading Y matrices')
         Utility.download_file(johnson_Y_matrices_url, johnson_Y_matrices_original_file)
 
     johnson_Y_matrices_file = os.path.join(data_dir,'Y-Kinases.xlsx')
-    Utility.rearrange_matrices(johnson_Y_matrices_original_file, sheet_name = 'tyrosine_all_norm_scaled_matric', pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4', '5'], output_file = johnson_Y_matrices_file)
+    if not os.path.exists(johnson_Y_matrices_file):
+        print('Rearranging Y matrices')
+        PWM_Matrices.rearrange_matrices(johnson_Y_matrices_original_file, sheet_name = 'tyrosine_all_norm_scaled_matric', pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4', '5'], output_file = johnson_Y_matrices_file, remove_suffix = '_TYR')
 
-    
     ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
     ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
 
-    Y_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM3_ESM.xlsx'
-
-    ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
-    Y_matrix_to_uniprot = os.path.join(data_dir,'Y-Kinases_to_Uniprot.xlsx')
-
     if not os.path.exists(ST_matrix_to_uniprot):
         Utility.download_file(ST_matrix_to_uniprot_url, ST_matrix_to_uniprot)
+        
+    Y_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM3_ESM.xlsx'
+    Y_matrix_to_uniprot = os.path.join(data_dir,'Y-Kinases_to_Uniprot.xlsx')
 
     if not os.path.exists(Y_matrix_to_uniprot):
         Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
@@ -534,6 +519,7 @@ def DefaultConfiguration() :
 
 
     if not os.path.exists(ochoa_background_original_file):
+        print('Downloading Ochoa background')
         Utility.download_file(ochoa_background_url, ochoa_background_original_file)
 
 
@@ -542,27 +528,34 @@ def DefaultConfiguration() :
     tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
 
     if not os.path.exists(tyrosine_background_original_file):
+        print('Downloading tyrosine background')
         Utility.download_file(tyrosine_background_url, tyrosine_background_original_file)
 
+    print('Loading ST matrices')
     ST_matrices = PWM_Matrices(johnson_ST_matrices_file)
     ST_matrices.add_densitometry(densitometry_file)
 
-    Y_matrices = PWM_Matrices(johnson_Y_matrices_file, ignore_suffix='_TYR')
+    print('Loading Y matrices (w/ non-canonical)')
+    Y_matrices = PWM_Matrices(johnson_Y_matrices_file)
 
+    print('Creating scoring objects')
     st_scoring = Scoring(ST_matrices)
     y_scoring = Scoring(Y_matrices)
     
     ochoa_background_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
 
     if not os.path.exists(ochoa_background_file) :
-        PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring, ochoa_background_file)
-
+        print('Building Ochoa background')
+        PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring, ochoa_background_file, progress='terminal')
 
     tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
     tyrosine_background_file = os.path.join(data_dir, 'johnson_tyrosine_background_wfav.tsv')
 
     if not os.path.exists(tyrosine_background_file) :
-        PeptideBackground.background_factory(tyrosine_background_original_file, 'Annotation - Canonical only', y_scoring, tyrosine_background_file)
+        #doesn't matter if canonical or not because only using peptide sequences
+        print('Building tyrosine background')
+        PeptideBackground.background_factory(tyrosine_background_original_file, 'Annotation - Canonical only', y_scoring, tyrosine_background_file, progress='terminal')
+
 
     human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
     if not os.path.exists(human_kinases_database_file):
