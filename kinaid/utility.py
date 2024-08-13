@@ -272,8 +272,9 @@ class Utility :
             entrez_id_dict = pd.read_csv(entrez_to_uniprot_dict_file, index_col=0).to_dict()['uniprot_id']
         else:
             entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
-            pd.Series(entrez_id_dict).to_csv(entrez_to_uniprot_dict_file, columns=['entrez_id', 'uniprot_id'])
-
+            entrez_id_df = pd.DataFrame.from_dict(entrez_id_dict, orient='index', columns=['uniprot_id'])
+            entrez_id_df.index.name = 'entrez_id'
+            entrez_id_df.to_csv(entrez_to_uniprot_dict_file)
         
         organism_entrez_ids = set(entrez_id_dict.keys())
         
