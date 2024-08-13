@@ -72,7 +72,7 @@ class Utility :
                     time.sleep(1)
             else :
                 break
-            print(f'Try {i+1}')
+            print(f'Retry {i+1}')
         if response == None or not response.ok:
             print('Failed to get mapping results from UniProt, check connection')
             return {}
@@ -90,8 +90,8 @@ class Utility :
                     in_taxon : int = 9606,
                     out_taxon : int = 7227,
                     url : str = 'https://www.flyrnai.org/tools/diopt/web/diopt_api/v9/get_orthologs_from_entrez',
-                    best_score : bool = True,
-                    best_score_rev : bool = True,
+                    best_score : bool = False,
+                    best_score_rev : bool = False,
                     species_specific : bool =True,
                     confidence = 'moderate',
                     exponential_backoff : bool = True,
@@ -202,7 +202,7 @@ class Utility :
         return entrez_to_uniprot_dict
 
     @staticmethod
-    def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids_st:set, human_kinase_entrez_ids_y:set, best_score:bool=True, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
+    def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids_st:set, human_kinase_entrez_ids_y:set, best_score:bool=False, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
         __human_tax_id = '9606'
         matches = Utility.get_orthologs(species_entrez_id, in_taxon=tax_id, out_taxon=__human_tax_id, best_score=best_score, best_score_rev=best_score_rev, confidence=confidence, species_specific=species_specific)
         matched_human_kinase_st = [('ST', species_entrez_id, ortholog, species_specific_geneid_type,
@@ -256,7 +256,7 @@ class Utility :
             taxon_id : int,
             proteome_id : str,
             canonical_only : bool = False,
-            best_score : bool = True,
+            best_score : bool = False,
             best_score_rev : bool = False,
             confidence : str = 'moderate',
             species_specific_geneid : bool = True,
@@ -266,7 +266,14 @@ class Utility :
 
         filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{"con" if canonical_only else "noncon"}.tsv')
 
-        entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
+        entrez_to_uniprot_dict_file = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_entrez_to_uniprot_dict.csv')
+
+        if os.path.exists(entrez_to_uniprot_dict_file):
+            entrez_id_dict = pd.read_csv(entrez_to_uniprot_dict_file, index_col=0).to_dict()['uniprot_id']
+        else:
+            entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
+            pd.Series(entrez_id_dict).to_csv(entrez_to_uniprot_dict_file, columns=['entrez_id', 'uniprot_id'])
+
         
         organism_entrez_ids = set(entrez_id_dict.keys())
         
@@ -296,7 +303,6 @@ class Utility :
                 
         return result_df
         
-        #result_df.to_csv(output_file, sep='\t', index=False)
 
     @staticmethod
     def refactor_ortholog_file(ortholog_file : str,
@@ -304,9 +310,23 @@ class Utility :
                             entrez_to_human_kinase_dict : dict,
                             output_file : str,
                             match_confidence : str  = 'moderate',
-                            result_best_score : bool = True,
-                            result_best_score_rev : bool = True) :
+                            result_best_score : bool = False,
+                            result_best_score_rev : bool = False) :
         df = pd.read_csv(ortholog_file, sep='\t')
+
+        unique_kinase_types = df['kinase_type'].unique()
+        unique_kinase_types_dict = {}
+
+        for unique_kinase_type in unique_kinase_types:
+            unique_kinase_type_df = df[df['kinase_type'] == unique_kinase_type]
+            unique_kinase_type_group_df = unique_kinase_type_df.groupby('human_entrez_id')['match_confidence'].max()
+            unique_kinase_types_dict[unique_kinase_type] = unique_kinase_type_group_df.to_dict()
+
+        df['max_confidence'] = df.apply(lambda row: unique_kinase_types_dict[row['kinase_type']][row['human_entrez_id']], axis=1)
+
+        #remove rows with confidence less than the max confidence
+        df = df[df['match_confidence'] == df['max_confidence']]
+
         df['kinase_name'] = df['human_entrez_id'].map(entrez_to_human_kinase_dict)
         df['organism'] = organism
         df['gene_id_type'] = 'GeneID'
@@ -335,8 +355,7 @@ class Utility :
         df = df[(df['gene_id'] != '') & (df['gene_id_type'] != '')]
         
         #remove rows with '-' in gene_id or geneid_type
-        df = df[(df['gene_id'] != '-') & (df['gene_id_type'] != '-')]
-        
+        df = df[(df['gene_id'] != '-') & (df['gene_id_type'] != '-')]        
         
         df.to_csv(output_file, sep='\t', index=False)
 
@@ -398,8 +417,8 @@ class Utility :
     @staticmethod
     def get_human_kinase_geneIDs(kinases_uniprot : set, kinase_dict : dict) :
         human_uniprot_to_entrez_job = Utility.make_map_ids_job(kinases_uniprot, 'UniProtKB_AC-ID', 'GeneID')
-        time.sleep(3)
-        human_kinases_uniprot_to_entrez_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_job)
+        time.sleep(5)
+        human_kinases_uniprot_to_entrez_dict = Utility.get_map_ids_results(human_uniprot_to_entrez_job, max_tries=10)
         
         #print the differences between the uniprot ids and the ids that were mapped
         unmapped_ids = kinases_uniprot - set(human_kinases_uniprot_to_entrez_dict.keys())
@@ -430,10 +449,11 @@ class Utility :
             Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
             
         st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict = Utility.get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot)
-        
-        human_kinases_uniprot_to_entrez_st_dict,_,_,_,unmapped_st = Utility.get_human_kinase_geneIDs(st_kinases_uniprot, st_kinase_dict)
-        
+        human_kinases_uniprot_to_entrez_st_dict,_,_,_,unmapped_st = Utility.get_human_kinase_geneIDs(st_kinases_uniprot, st_kinase_dict)        
         human_kinases_uniprot_to_entrez_y_dict,_,_,_,unmapped_y = Utility.get_human_kinase_geneIDs(y_kinases_uniprot, y_kinase_dict)
+
+        if len(human_kinases_uniprot_to_entrez_st_dict) == 0 or len(human_kinases_uniprot_to_entrez_y_dict) == 0:
+            raise ValueError('No human kinases could be mapped from UniProt to GeneID: perhaps UniProt is down or the IDs are incorrect')
         
         st_kinase_geneIDs = [('ST', 'human', k, 'GeneID', g, k) for k, u in st_kinase_dict.items() if u not in unmapped_st for g in human_kinases_uniprot_to_entrez_st_dict[u]]
         st_kinase_UniProt = [('ST', 'human', k, 'UniProtKB', u, k) for k, u in st_kinase_dict.items()]
@@ -463,9 +483,8 @@ class Utility :
         
         return kinase_to_uniprot_dict, entrez_to_kinase_dict
         
-def DefaultConfiguration() :
+def DefaultConfiguration(threads : int = 8) :
     data_dir = './data'
-    threads = 8
     
     if not os.path.exists(data_dir):
         print('Creating data directory')
@@ -559,6 +578,7 @@ def DefaultConfiguration() :
 
     human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
     if not os.path.exists(human_kinases_database_file):
+        print('Creating id mapping of human kinases')
         Utility.build_human_kinase_database(data_dir, human_kinases_database_file)
     
     
@@ -583,7 +603,6 @@ def DefaultConfiguration() :
         os.makedirs(orthologs_dir)
     
     
-    #Utility.build_ortholog_database_for_organism(human_entrez_ids, 'human', 9606, 'UP000005640')
     arguments = [
                     ('mouse', 10090, 'UP000000589'),
                     ('fly', 7227, 'UP000000803'),

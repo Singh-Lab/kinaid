@@ -93,8 +93,8 @@ class Session :
             print(f'Number of ST kinases tested : {len(self._st_percentiles)}')
             print(f'Number of Y kinases tested : {len(self._y_percentiles)}')
         
-        self._st_kinase_matches = MatchWithMapping.get_kinase_matches_for_peptides(num_st_peptides, self._st_percentiles, match_threshold)
-        self._y_kinase_matches = MatchWithMapping.get_kinase_matches_for_peptides(num_y_peptides, self._y_percentiles, match_threshold)
+        self._st_kinase_matches = sorted(MatchWithMapping.get_kinase_matches_for_peptides(num_st_peptides, self._st_percentiles, match_threshold))
+        self._y_kinase_matches = sorted(MatchWithMapping.get_kinase_matches_for_peptides(num_y_peptides, self._y_percentiles, match_threshold))
         
         self._st_peptide_matches = MatchWithMapping.get_peptide_matches_for_kinases(self._st_percentiles, match_threshold)
         self._y_peptide_matches = MatchWithMapping.get_peptide_matches_for_kinases(self._y_percentiles, match_threshold)
