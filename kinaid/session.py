@@ -19,16 +19,30 @@ class Session :
     ID_COLUMN: Final[str] = '__ENTRY_ID'
     CLEAN_PEPTIDE_COLUMN: Final[str] = '__CLEAN_PEPTIDE'
     
+
     @staticmethod
-    def build_id_column(df : pd.DataFrame, column_names : Dict[str, str]) -> pd.DataFrame :
-        id_column = None
-        if column_names['id'] is None and column_names['site'] is None :
-            id_column = df.index
-        elif column_names['id'] is not None and column_names['site'] is None :
-            id_column = df[column_names['id']].astype(str) + '_' + df.index.astype(str)
-        elif column_names['id'] is not None and column_names['site'] is not None :
-            id_column = df[column_names['id']].astype(str) + '_' + df[column_names['site']].astype(str)
-        return id_column
+    def handle_special_id_column(df : pd.DataFrame, in_id_column : str, id_type : str, out_id_column : str = '__MOD_ID') -> pd.Series :
+        if in_id_column not in df.columns :
+            return None
+
+        if id_type == 'SGD' :
+            df[out_id_column] = df[in_id_column].apply(lambda x: x.split(':')[1] if ':' in x else x)
+            df[out_id_column] = 'SGD:' + df[out_id_column]
+        else :
+            out_id_column = in_id_column
+        return out_id_column
+        
+        
+    @staticmethod
+    def build_id_column(df : pd.DataFrame, column_names : Dict[str, str], id_column = 'id') -> pd.Series :
+        ids_column = None
+        if column_names[id_column] is None and column_names['site'] is None :
+            ids_column = df.index
+        elif column_names[id_column] is not None and column_names['site'] is None :
+            ids_column = df[column_names[id_column]].astype(str) + '_' + df.index.astype(str)
+        elif column_names[id_column] is not None and column_names['site'] is not None :
+            ids_column = df[column_names[id_column]].astype(str) + '_' + df[column_names['site']].astype(str)
+        return ids_column
             
     def __init__(self,
                 session_id : str,
@@ -39,6 +53,7 @@ class Session :
                 matching_y : MatchWithMapping,
                 selected_kinases : Set[str] = None,
                 match_threshold : float = 90.0,
+                id_type : str = 'GeneID',
                 debug : bool = False
                 ) :
         self._session_id = session_id
@@ -92,8 +107,8 @@ class Session :
         self._st_df[Session.CLEAN_PEPTIDE_COLUMN] = self._st_df[self._column_names['peptide']].apply(lambda x : matching_st._scoring.clean_sequence(x, self._mode))
         self._y_df[Session.CLEAN_PEPTIDE_COLUMN] = self._y_df[self._column_names['peptide']].apply(lambda x : matching_y._scoring.clean_sequence(x, self._mode))
         
-        self._st_ids = Session.build_id_column(self._st_df, column_names)
-        self._y_ids = Session.build_id_column(self._y_df, column_names)
+        self._st_ids = Session.build_id_column(self._st_df, column_names, 'id')
+        self._y_ids = Session.build_id_column(self._y_df, column_names, 'id')
         
         num_st_peptides = len(self._st_df)
         num_y_peptides = len(self._y_df)

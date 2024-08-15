@@ -240,6 +240,10 @@ class Utility :
         
         result_df['species_entrez_id'] = result_df['species_entrez_id'].astype(np.int64) 
         result_df['human_entrez_id'] = result_df['human_entrez_id'].astype(np.int64)
+
+        #special cases for yeast
+        if organism_name == 'yeast' :
+            result_df['species_specific_geneid'] = result_df['species_specific_geneid'].apply(lambda x: f'SGD:{x}')
                 
         return result_df   
 
@@ -439,7 +443,23 @@ class Utility :
         entrez_to_kinase_dict = dict(zip(df_entrez['gene_id'], df_entrez['kinase_name']))
         
         return kinase_to_uniprot_dict, entrez_to_kinase_dict
+
+    @staticmethod 
+    def build_final_orthologs_database(df_final : pd.DataFrame, output_file:str) :
+
+
+        df_final = df_final.sort_values(by=['organism', 'gene_id_type', 'kinase_type', 'kinase_name'])
         
+        df_final['symbol'] = df_final['symbol'].astype(str)
+        df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(list).reset_index()
+        df_group['short'] = df_group.apply(lambda x: x['symbol'][0] if len(x['symbol']) == 1 else f'({x["kinase_name"]})', axis=1)
+        df_group['long'] = df_group.apply(lambda x: f'{x["short"]}:{"+".join(sorted(x["symbol"]))}' if len(x['symbol']) > 1 else x['short'], axis=1)
+        df_final = df_group.explode(['gene_id', 'symbol']).reset_index(drop=True)
+        
+        output_file = output_file.replace('.tsv', '_2.tsv')
+        df_final.to_csv(output_file, sep='\t', index=False)
+
+@staticmethod        
 def DefaultConfiguration(threads : int = 8) :
     data_dir = './data'
     
@@ -620,6 +640,8 @@ def DefaultConfiguration(threads : int = 8) :
         
         df_final = pd.concat([df, df_uniprot])
         
+        Utility.build_final_orthologs_database(df_final, output_file)
+
         #print(df_final.head())
         #sort by organism, gene_id_type, kinase_name
         df_final = df_final.sort_values(by=['organism', 'gene_id_type', 'kinase_name'])
@@ -627,7 +649,7 @@ def DefaultConfiguration(threads : int = 8) :
         df_final['symbol'] = df_final['symbol'].astype(str)
         df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(set).reset_index()
         df_group['symbol'] = df_group['symbol'].apply(lambda x: list(x))
-        df_group['symbol'] = df_group['symbol'].apply(lambda x: sorted(x))
+        #df_group['symbol'] = df_group['symbol'].apply(lambda x: sorted(x))
         df_group['symbol'] = df_group.apply(lambda x: f'({x["kinase_name"]}-like){"+".join(x["symbol"])}' if len(x['symbol']) > 1 else x['symbol'][0], axis=1)
         df_final = df_group.explode('gene_id')
         
