@@ -453,7 +453,7 @@ class Utility :
         df_final['symbol'] = df_final['symbol'].astype(str)
         df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(list).reset_index()
         df_group['short'] = df_group.apply(lambda x: x['symbol'][0] if len(x['symbol']) == 1 else f'({x["kinase_name"]})', axis=1)
-        df_group['long'] = df_group.apply(lambda x: f'{x["short"]}:{"+".join(sorted(x["symbol"]))}' if len(x['symbol']) > 1 else x['short'], axis=1)
+        df_group['long'] = df_group.apply(lambda x: f'{x["short"]}:{",".join(sorted(x["symbol"]))}' if len(x['symbol']) > 1 else x['short'], axis=1)
         df_final = df_group.explode(['gene_id', 'symbol']).reset_index(drop=True)
         
         output_file = output_file.replace('.tsv', '_2.tsv')
