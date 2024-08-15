@@ -5,8 +5,7 @@ import os
 import numpy as np
 from mpire import WorkerPool
 from .matching import PWM_Matrices, Scoring, PeptideBackground
-import platform
-import multiprocessing
+
 from typing import List, Tuple
 
 class Utility :
@@ -164,51 +163,6 @@ class Utility :
                 matches.append((-1, None, None, None, None, None, None))
             return matches
 
-    """
-    @staticmethod
-    def download_proteome(organism_name : str,
-                        taxon_id : int,
-                        proteome_id : str,
-                        canonical_only : bool = False,
-                        proteome_dir : str = 'proteomes',
-                        format : str = 'tsv') -> str:
-        if not os.path.exists(proteome_dir):
-            os.makedirs(proteome_dir)
-        
-        canonical = 'con' if canonical_only else 'noncon'
-        filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{canonical}.{format}')
-        
-        if os.path.exists(filename):
-            return filename
-        
-        if not canonical_only :
-            url = f'https://rest.uniprot.org/uniprotkb/stream?fields=accession%2Creviewed%2Cid%2Cprotein_name&format={format}&query=%28%28proteome%3A{proteome_id}%29%29'
-        else :
-            url = f'https://rest.uniprot.org/uniprotkb/stream?fields=accession%2Creviewed%2Cid%2Cprotein_name&format={format}&query=%28%28proteome%3A{proteome_id}%29+AND+reviewed%3Dtrue%29'
-        
-        Utility.download_file(url, filename)
-        return filename
-    """
-    
-    """
-    @staticmethod
-    def get_entrez_ids_of_proteome(proteome_file : str) -> dict:
-        #open the file (.tsv) with the proteome of the species as a dataframe
-        proteome_df = pd.read_csv(proteome_file, sep='\t')
-
-        #get uniprot ids of the proteome into a list
-        uniprot_ids = proteome_df['Entry'].tolist()
-
-        #get the entrez ids of the uniprot ids
-        uniprot_to_entrez_job = Utility.make_map_ids_job(uniprot_ids, 'UniProtKB_AC-ID', 'GeneID')
-        time.sleep(3)
-        uniprot_to_entrez_dict = Utility.get_map_ids_results(uniprot_to_entrez_job, max_tries=10)
-
-        #create a dict from entrez id to uniprot id
-        entrez_to_uniprot_dict = {int(e): uniprot for uniprot, entrez_id_list in uniprot_to_entrez_dict.items() for e in entrez_id_list}
-
-        return entrez_to_uniprot_dict
-    """
     
     @staticmethod
     def get_ortholog_from_human(
@@ -220,7 +174,13 @@ class Utility :
         confidence : str = 'moderate',
         species_specific : bool = True) -> List[Tuple[str, int, int, str, int, int, bool, bool, str]] :
         __human_tax_id = '9606'
-        orthologs = Utility.get_orthologs(human_entrez_id, in_taxon=__human_tax_id, out_taxon=tax_id, best_score=best_score, best_score_rev=best_score_rev, confidence=confidence, species_specific=species_specific)
+        orthologs = Utility.get_orthologs(human_entrez_id,
+                                          in_taxon=__human_tax_id,
+                                          out_taxon=tax_id,
+                                          best_score=best_score,
+                                          best_score_rev=best_score_rev,
+                                          confidence=confidence,
+                                          species_specific=species_specific)
         
         results = [(kinase_type, human_entrez_id) + o for o in orthologs]
         
@@ -228,55 +188,6 @@ class Utility :
             return None
         else:
             return results
-        
-    """
-    @staticmethod
-    def get_ortholog_in_human(tax_id:int, species_entrez_id:int, human_kinase_entrez_ids_st:set, human_kinase_entrez_ids_y:set, best_score:bool=False, best_score_rev:bool=False, confidence:str='moderate', species_specific:bool=True) :
-        __human_tax_id = '9606'
-        matches = Utility.get_orthologs(species_entrez_id, in_taxon=__human_tax_id, out_taxon=tax_id, best_score=best_score, best_score_rev=best_score_rev, confidence=confidence, species_specific=species_specific)
-        matched_human_kinase_st = [('ST', species_entrez_id, ortholog, species_specific_geneid_type,
-                                species_specific_geneid,
-                                match_confidence,
-                                    result_best_score,
-                                    result_best_score_rev,
-                                        result_symbol) for ortholog, 
-                            species_specific_geneid_type,
-                                species_specific_geneid,
-                                match_confidence,
-                                    result_best_score,
-                                    result_best_score_rev,
-                                        result_symbol in matches if ortholog in human_kinase_entrez_ids_st]
-        matched_human_kinase_y = [('Y', species_entrez_id, ortholog, species_specific_geneid_type,
-                                species_specific_geneid,
-                                match_confidence,
-                                    result_best_score,
-                                    result_best_score_rev,
-                                        result_symbol) for ortholog, 
-                            species_specific_geneid_type,
-                                species_specific_geneid,
-                                match_confidence,
-                                    result_best_score,
-                                    result_best_score_rev,
-                                        result_symbol in matches if ortholog in human_kinase_entrez_ids_y]
-        
-        matched_human_kinase = matched_human_kinase_st + matched_human_kinase_y
-        
-        if len(matched_human_kinase) == 0:
-            return None
-        else:
-            return matched_human_kinase
-    
-    @staticmethod
-    def job(shared_objects, entrez_id) :
-        taxon_id = shared_objects['taxon_id']
-        human_kinase_entrez_ids_st = shared_objects['human_kinase_entrez_ids_st']
-        human_kinase_entrez_ids_y = shared_objects['human_kinase_entrez_ids_y']
-        best_score = shared_objects['best_score']
-        best_score_rev = shared_objects['best_score_rev']
-        confidence = shared_objects['confidence']
-        species_specific = shared_objects['species_specific']
-        return Utility.get_ortholog_in_human(taxon_id, entrez_id, human_kinase_entrez_ids_st, human_kinase_entrez_ids_y, best_score, best_score_rev, confidence, species_specific)
-    """
     
     def job(shared_objects, entrez_id, kinase_type) :
         taxon_id = shared_objects['taxon_id']
@@ -284,7 +195,13 @@ class Utility :
         best_score_rev = shared_objects['best_score_rev']
         confidence = shared_objects['confidence']
         species_specific = shared_objects['species_specific']
-        return Utility.get_ortholog_from_human(taxon_id, entrez_id, kinase_type, best_score, best_score_rev, confidence, species_specific)
+        return Utility.get_ortholog_from_human(taxon_id,
+                                               entrez_id,
+                                               kinase_type,
+                                               best_score,
+                                               best_score_rev,
+                                               confidence,
+                                               species_specific)
         
         
     @staticmethod
@@ -324,65 +241,7 @@ class Utility :
         result_df['species_entrez_id'] = result_df['species_entrez_id'].astype(np.int64) 
         result_df['human_entrez_id'] = result_df['human_entrez_id'].astype(np.int64)
                 
-        return result_df
-    
-    """
-    @staticmethod
-    def build_ortholog_database_for_organism(
-            human_kinase_entrez_ids_st : set,
-            human_kinase_entrez_ids_y : set,
-            organism_name : str,
-            taxon_id : int,
-            proteome_id : str,
-            canonical_only : bool = False,
-            best_score : bool = False,
-            best_score_rev : bool = False,
-            confidence : str = 'moderate',
-            species_specific_geneid : bool = True,
-            proteome_dir : str = 'proteomes',
-            threads = 2) -> pd.DataFrame :
-        Utility.download_proteome(organism_name, taxon_id, proteome_id, canonical_only, proteome_dir)
-
-        filename = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_{"con" if canonical_only else "noncon"}.tsv')
-
-        entrez_to_uniprot_dict_file = os.path.join(proteome_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_entrez_to_uniprot_dict.csv')
-
-        if os.path.exists(entrez_to_uniprot_dict_file):
-            entrez_id_dict = pd.read_csv(entrez_to_uniprot_dict_file, index_col=0).to_dict()['uniprot_id']
-        else:
-            entrez_id_dict = Utility.get_entrez_ids_of_proteome(filename)
-            entrez_id_df = pd.DataFrame.from_dict(entrez_id_dict, orient='index', columns=['uniprot_id'])
-            entrez_id_df.index.name = 'entrez_id'
-            entrez_id_df.to_csv(entrez_to_uniprot_dict_file)
-        
-        organism_entrez_ids = set(entrez_id_dict.keys())
-        
-        shared_objects = {'taxon_id' : taxon_id,
-                          'human_kinase_entrez_ids_st' : human_kinase_entrez_ids_st,
-                          'human_kinase_entrez_ids_y' : human_kinase_entrez_ids_y,
-                          'best_score' : best_score,
-                          'best_score_rev' : best_score_rev,
-                          'confidence' : confidence,
-                          'species_specific' : species_specific_geneid}
-        
-        with WorkerPool(threads, shared_objects=shared_objects, start_method='spawn') as pool:
-            results = pool.map_unordered(Utility.job, organism_entrez_ids, progress_bar=True)
-
-        #remove None values from the list
-        results = [x for x in results if x is not None]
-
-        #flatten the list
-        results = [item for sublist in results for item in sublist]
-        
-        print('Finished for species: ' + organism_name)
-        
-        result_df = pd.DataFrame(results, columns=['kinase_type', 'species_entrez_id', 'human_entrez_id', 'species_specific_geneid_type', 'species_specific_geneid', 'match_confidence', 'result_best_score', 'result_best_score_rev', 'symbol'])
-        
-        result_df['species_entrez_id'] = result_df['species_entrez_id'].astype(int) 
-        result_df['human_entrez_id'] = result_df['human_entrez_id'].astype(int)
-                
-        return result_df
-    """   
+        return result_df   
 
     @staticmethod
     def refactor_ortholog_file(ortholog_file : str,
@@ -429,7 +288,6 @@ class Utility :
         #df.drop(columns=['species_specific_geneid', 'human_entrez_id', 'species_specific_geneid_type', 'species_entrez_id', 'match_confidence', 'result_best_score', 'result_best_score_rev'], inplace=True)
 
         df_entrez = df[['organism', 'kinase_name', 'kinase_type', 'gene_id_type', 'gene_id', 'symbol']].copy()
-        print(df_entrez.head())
         df_specific = df[['organism', 'kinase_name', 'kinase_type', 'species_specific_geneid_type', 'species_specific_geneid', 'symbol']].copy()
         
         #remove rows with NaN values in gene_id or geneid_type
@@ -770,7 +628,7 @@ def DefaultConfiguration(threads : int = 8) :
         df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(set).reset_index()
         df_group['symbol'] = df_group['symbol'].apply(lambda x: list(x))
         df_group['symbol'] = df_group['symbol'].apply(lambda x: sorted(x))
-        df_group['symbol'] = df_group['symbol'].apply(lambda x: '+'.join(x))
+        df_group['symbol'] = df_group.apply(lambda x: f'({x["kinase_name"]}-like){"+".join(x["symbol"])}' if len(x['symbol']) > 1 else x['symbol'][0], axis=1)
         df_final = df_group.explode('gene_id')
         
         df_final.to_csv(output_file, sep='\t', index=False)

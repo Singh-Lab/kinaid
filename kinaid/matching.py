@@ -314,7 +314,7 @@ class MatchWithMapping(Match) :
     
     @staticmethod
     def get_kinase_matches_for_peptides(num_peptides : int, percentiles : Dict[str, List[float]], match_threshold : float) -> List[List[str]] :
-        return [[k for k,ps in percentiles.items() if ps[i] >= match_threshold] for i in range(num_peptides)]
+        return [set(sorted([k for k,ps in percentiles.items() if ps[i] >= match_threshold])) for i in range(num_peptides)]
     
     @staticmethod
     def get_peptide_matches_for_kinases(percentiles : Dict[str, List[float]], match_threshold : float) -> Dict[str, List[int]] :
