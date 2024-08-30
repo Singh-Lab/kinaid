@@ -5,6 +5,7 @@ from typing import List, Set, Dict
 from tqdm.notebook import tqdm_notebook
 from tqdm import tqdm
 import numpy as np
+from .ortholog import OrthologsWithGeneType
 
 class PWM_Matrices :
     @staticmethod
@@ -163,6 +164,14 @@ class Scoring:
             return sequence[len(sequence) // 2]
         else :
             raise ValueError('Invalid sequence format')
+    
+    @staticmethod
+    def get_phosphorylation_site_type(sequence : str, mode : str = None) -> str :
+        site = Scoring.get_phosphorylation_site(sequence, mode).upper()
+        if site == 'S' or site == 'T' :
+            return 'ST'
+        else :
+            return site
         
     @staticmethod
     def split_by_phosphorylation_site(sequence : str, mode : str = None) -> str:
@@ -313,32 +322,42 @@ class Match :
 class MatchWithMapping(Match) :
     
     @staticmethod
-    def get_kinase_matches_for_peptides(num_peptides : int, percentiles : Dict[str, List[float]], match_threshold : float) -> List[List[str]] :
-        return [set(sorted([k for k,ps in percentiles.items() if ps[i] >= match_threshold])) for i in range(num_peptides)]
+    def get_kinase_matches_for_peptides(num_peptides : int, percentiles : Dict[str, List[float]], match_threshold : float) -> List[Set[str]] :
+        return [set([k for k,ps in percentiles.items() if ps[i] >= match_threshold]) for i in range(num_peptides)]
     
     @staticmethod
     def get_peptide_matches_for_kinases(percentiles : Dict[str, List[float]], match_threshold : float) -> Dict[str, List[int]] :
         return {k:[i for i,p in enumerate(ps) if p >= match_threshold] for k,ps in percentiles.items()}
     
-    def __init__(self, scoring : Scoring, background : PeptideBackground, mapping : dict) :
+    def __init__(self, scoring : Scoring, background : PeptideBackground, mapping : OrthologsWithGeneType, selected_symbols : Set[str] = set()) :
         super().__init__(scoring, background)
-        self._mapping = mapping
-        self._mapped_kinase_names = list(mapping.values())
+        
+        self._mapped_kinase_names = mapping.get_kinase_names()
         if not all(k in scoring._kinase_names for k in self._mapped_kinase_names) :
-            #print(set(scoring._kinase_names) - set(self._mapped_kinase_names))
-            print(scoring._kinase_names)
+            print(set(scoring._kinase_names) - set(self._mapped_kinase_names))
             raise ValueError('Invalid kinase names in mapping')
+        
+        if selected_symbols is None or len(selected_symbols) == 0 :
+            self._selected_symbols = mapping.get_long_names()
+        else :
+            self._selected_symbols = [ss for ss in selected_symbols if ss in mapping.get_long_names()]
+            
+        sorted(self._selected_symbols)
+        self._selected_symbols = set(self._selected_symbols)
+
+        self._mapping = mapping
+        
+
+    def get_selected_symbols(self) :
+        return self._selected_symbols
     
     def get_percentile(self, sequence : str, kinase_symbol : str, mode : str = None, low_score_skip : bool = False) :
-        return super().get_percentile(sequence, self._mapping[kinase_symbol], mode, low_score_skip)
+        return super().get_percentile(sequence, self._mapping.get(kinase_symbol), mode, low_score_skip)
     
     def get_percentiles_for_kinase(self, sequences : List[str], kinase_symbol : str, mode : str = None, low_score_skip : bool = False) :
         return [self.get_percentile(s, kinase_symbol, mode, low_score_skip) for s in sequences]
     
-    def get_percentiles_for_all_kinases(self, sequences : List[str], mode : str = None, low_score_skip : bool = False) :
-        return {sk:self.get_percentiles_for_kinase(sequences, sk, mode, low_score_skip) for sk in self._mapping}
-    
-    def get_percentiles_for_selected_kinases(self, sequences : List[str], selected_kinases : Set[str], mode : str = None, low_score_skip : bool = False) :
-        return {sk:self.get_percentiles_for_kinase(sequences, sk, mode, low_score_skip) for sk in self._mapping if sk in selected_kinases}
+    def get_percentiles_for_selected_kinases(self, sequences : List[str], mode : str = None, low_score_skip : bool = False) :
+        return {sk:self.get_percentiles_for_kinase(sequences, sk, mode, low_score_skip) for sk in self._selected_symbols}
     
     

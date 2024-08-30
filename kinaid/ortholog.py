@@ -3,11 +3,15 @@ from typing import List, Dict
 import pandas as pd
 
 class OrthologsWithGeneType :
+
+    
     def __init__(self, df : pd.DataFrame,
                  organism : str,
                  gene_id_type: str,
                  kinase_type: str = 'ST',
                  ambiguous: bool = False,
+                 multispecificity_symbols : set = {},
+                 longest_long : Dict[str, str] = {},
                  symbol_column: str = 'symbol',
                  kinase_name_column: str = 'kinase_name',
                  gene_id_type_column: str = 'gene_id_type',
@@ -21,7 +25,7 @@ class OrthologsWithGeneType :
         self._kinase_type = kinase_type
         self._gene_id_type = gene_id_type
         self._ambiguous = ambiguous
-        
+        self._multispecificity = multispecificity_symbols
         df_copy = df.copy()
         df_copy = df_copy[df_copy[gene_id_type_column] == gene_id_type]
         df_copy = df_copy[df_copy[kinase_type_column] == kinase_type]
@@ -38,10 +42,49 @@ class OrthologsWithGeneType :
         self._covered_kinases = df_copy[kinase_name_column].unique()
         self._covered_symbols = df_copy[symbol_column].unique()
         
-        self._long_to_kinase_name_dict = df_copy[[long_column, kinase_name_column]].groupby(long_column).agg(list)[kinase_name_column].to_dict()
+        self._long_to_kinase_name_dict = df_copy[[long_column, kinase_name_column]].groupby(long_column).agg('first')[kinase_name_column].to_dict()
         
         self._long_to_gene_id_dict = df_copy[[long_column, gene_id_column]].groupby(long_column).agg(list)[gene_id_column].to_dict()
+
+        self._id_to_long_dict = df_copy.set_index(gene_id_column)[long_column].to_dict()
         
+        self._longest_long_dict = longest_long
+    
+    
+    def get_longest_long_dict(self) -> Dict[str, str] :
+        return self._longest_long_dict.copy()
+    
+    def get_long_to_short_dict(self) -> Dict[str, str] :
+        return self._long_to_short_dict.copy()
+    
+    def get_short(self, long_name : str) -> str :
+        return self._long_to_short_dict.get(long_name, long_name)
+    
+    def handle_multispecificity_long(self, long_name : str, use_short = True) -> str :
+        return f'({self._kinase_type}){self.get_short(long_name) if use_short else long_name}' if long_name in self._multispecificity else (self.get_short(long_name) if use_short else long_name)
+    
+    def get_long_names(self) -> List[str] :
+        return list(self._long_to_short_dict.keys())
+    
+    def get_kinase_names(self) -> List[str] :
+        return list(self._long_to_kinase_name_dict.values())
+    
+    def get_long_name_from_id_dict(self) -> Dict[str, str] :
+        return self._id_to_long_dict.copy()
+    
+    def get_long_name_from_id(self, gene_id : str, ignore_warning : bool = False, debug : bool = False) -> str :
+        if(gene_id in self._id_to_long_dict) :
+            return self._id_to_long_dict[gene_id]
+        else :
+            if not ignore_warning :
+                print(f'Gene ID {gene_id} not found in the orthologs')
+                return None
+            else :
+                return gene_id
+    
+    def get(self, symbol : str) -> str :
+        return self._long_to_kinase_name_dict[symbol]
+    
     def print_stats(self) :
         print('\n')
         print(f'Organism: {self._organism}')
@@ -51,30 +94,48 @@ class OrthologsWithGeneType :
         print(f'Number of covered kinases: {len(self._covered_kinases)}')
         print(f'Number of covered symbols: {len(self._covered_symbols)}')
         
-class SpeciesOrthologs:
-    def __init__(self, species : str, ortholog_file : str) :
-        self.species = species
+class OrganismOrthologs:
+    def __init__(self, organism : str, ortholog_file : str) :
+        self.organism = organism
         self.ortholog_file = ortholog_file
         self.ortholog_df = pd.read_csv(ortholog_file, sep = '\t')
         
-        gene_id_types = self.ortholog_df['gene_id_type'].unique()
+        self._gene_id_types = self.ortholog_df['gene_id_type'].unique()
         kinase_types = self.ortholog_df['kinase_type'].unique()
         
+        self._kinase_types = set(kinase_types)
+        
+        multispecificity_dict = {g:self.ortholog_df[self.ortholog_df['gene_id_type'] == g][['kinase_type', 'long']].groupby('long').agg(set)['kinase_type'].to_dict() for g in self._gene_id_types}
+        self._multispecificity_longs = {g:{k for k, v in d.items() if len(v) > 1} for g,d in multispecificity_dict.items()}
+        
+        symbols_to_long = {g:self.ortholog_df[self.ortholog_df['gene_id_type'] == g][['kinase_type', 'symbol', 'long']].groupby('symbol').agg(set)['long'].to_dict() for g in self._gene_id_types}
+        multispecificity_symbols = {g:{s:sorted(v, key=len, reverse=True) for s, v in d.items() if len(v) > 1} for g,d in symbols_to_long.items()}
+        
+        longest_long = {g:{s:v[0] for s,v in d.items()} for g,d in multispecificity_symbols.items()}
         self.orthologs = {}
-        for gene_id_type in gene_id_types :
+        for gene_id_type in self._gene_id_types :
             for kinase_type in kinase_types :
                 for ambiguous in [True, False] :
                     ortholog = OrthologsWithGeneType(self.ortholog_df,
-                                                     species,
+                                                     organism,
                                                      gene_id_type,
                                                      kinase_type,
-                                                     ambiguous)
+                                                     ambiguous,
+                                                     self._multispecificity_longs[gene_id_type],
+                                                     longest_long[gene_id_type])
                     self.orthologs[(gene_id_type, kinase_type, ambiguous)] = ortholog
                     ortholog.print_stats()
+                    
     
     def get_orthologs(self, gene_id_type: str, kinase_type: str, ambiguous: bool) -> OrthologsWithGeneType :
         return self.orthologs[(gene_id_type, kinase_type, ambiguous)]
         
+    def is_supported_kinase_type(self, kinase_type : str) -> bool :
+        return kinase_type in self._kinase_types
+    
+    def get_available_id_types(self) -> List[str] :
+        return self._gene_id_types
+    
 class OrthologManager:
         
     def __init__(self, orthology_dir : str, suffix : str = '_orthologs_final.tsv', debug : bool = False) :
@@ -83,13 +144,15 @@ class OrthologManager:
         self.ortholog_files = [f for f in os.listdir(orthology_dir) if f.endswith(suffix)]
         self.organism_list = [f.split('_')[0] for f in self.ortholog_files]
         
-        self._species_ortho_dict = {}
+        self._organism_ortho_dict = {}
         for organism in self.organism_list:
             print(organism)
-            self._species_ortho_dict[organism] = SpeciesOrthologs(organism, os.path.join(orthology_dir, organism + suffix))
+            self._organism_ortho_dict[organism] = OrganismOrthologs(organism, os.path.join(orthology_dir, organism + suffix))
     
-    def get_orthologs(self, species : str, gene_id_type : str, kinase_type : str, ambiguous : bool ) -> SpeciesOrthologs :
-        return self._species_ortho_dict[species].get_orthologs(gene_id_type, kinase_type, ambiguous)
-    
+    def get_orthologs(self, organism : str, gene_id_type : str = None, kinase_type : str = None, ambiguous : bool = True) -> OrthologsWithGeneType :
+        if gene_id_type is not None and kinase_type is not None :
+            return self._organism_ortho_dict[organism].get_orthologs(gene_id_type, kinase_type, ambiguous)
+        else :
+            return self._organism_ortho_dict[organism]    
 if __name__ == '__main__' :
     ortholog_manager = OrthologManager('orthologs')

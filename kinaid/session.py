@@ -1,6 +1,7 @@
 from typing import Final, Set, Dict
 import pandas as pd
-from .matching import MatchWithMapping, Scoring
+from .matching import MatchWithMapping, Scoring, PeptideBackground
+from .ortholog import OrthologManager
 import time
 from time import perf_counter
 import plotly.express as px
@@ -11,6 +12,7 @@ import numpy as np
 from scipy.stats import norm
 from statsmodels.stats.multitest import fdrcorrection
 import math
+import dash_cytoscape as cyto
 
 
 
@@ -21,16 +23,12 @@ class Session :
     
 
     @staticmethod
-    def handle_special_id_column(df : pd.DataFrame, in_id_column : str, id_type : str, out_id_column : str = '__MOD_ID') -> pd.Series :
-        if in_id_column not in df.columns :
-            return None
-
+    def handle_special_id_column(id_column : pd.Series, id_type : str, out_id_column : str = '__MOD_ID') -> pd.Series :
+        id_column_new = id_column.copy()
         if id_type == 'SGD' :
-            df[out_id_column] = df[in_id_column].apply(lambda x: x.split(':')[1] if ':' in x else x)
-            df[out_id_column] = 'SGD:' + df[out_id_column]
-        else :
-            out_id_column = in_id_column
-        return out_id_column
+            id_column_new = id_column.apply(lambda x: x.split(':')[1] if ':' in x else x)
+            id_column_new = 'SGD:' + id_column_new
+        return id_column_new
         
         
     @staticmethod
@@ -43,48 +41,27 @@ class Session :
         elif column_names[id_column] is not None and column_names['site'] is not None :
             ids_column = df[column_names[id_column]].astype(str) + '_' + df[column_names['site']].astype(str)
         return ids_column
-            
+    
+    
     def __init__(self,
-                session_id : str,
-                organism : str,
-                df : pd.DataFrame,
-                column_names : Dict[str, str],
-                matching_st : MatchWithMapping,
-                matching_y : MatchWithMapping,
-                selected_kinases : Set[str] = None,
-                match_threshold : float = 90.0,
-                id_type : str = 'GeneID',
-                debug : bool = False
-                ) :
+                 session_id : str,
+                 organism : str,
+                 df : pd.DataFrame,
+                 column_names : Dict[str, str],
+                 scoring : Dict[str , Scoring],
+                 background : Dict[str , PeptideBackground],
+                 ortholog_manager : OrthologManager,
+                 selected_symbols : Set[str] = set(),
+                 match_threshold : float = 90.0,
+                 id_type : str = 'GeneID',
+                 ambiguous : bool = True,
+                 debug = False) :
+        
         self._session_id = session_id
         self._organism = organism
         self._column_names = column_names
-        self._matching_st = matching_st
-        self._matching_y = matching_y
+        self._network_df = None
         
-        available_kinases = set(matching_st._mapping.keys()) | set(matching_y._mapping.keys())
-        self._dual_specificity_kinases = set(matching_st._mapping.keys()) & set(matching_y._mapping.keys())
-        
-        shortened_kinase_names_st = {k : k if '+' not in k else f'({v}-like)' for k,v in matching_st._mapping.items()}
-        shortened_kinase_names_y = {k : k if '+' not in k else f'({v}-like)' for k,v in matching_y._mapping.items()}
-        
-        shortened_kinase_names_st = {k if k not in self._dual_specificity_kinases else f'{k}(ST)':v if k not in self._dual_specificity_kinases else f'{v}(ST)' for k,v in shortened_kinase_names_st.items()}
-        shortened_kinase_names_y = {k if k not in self._dual_specificity_kinases else f'{k}(Y)':v if k not in self._dual_specificity_kinases else f'{v}(Y)' for k,v in shortened_kinase_names_y.items()}
-        
-        self._shortened_kinase_names = shortened_kinase_names_st | shortened_kinase_names_y
-        
-
-
-        if selected_kinases is not None and not selected_kinases.issubset(available_kinases) :
-            raise ValueError(f'Selected kinases must be subset of available kinases: {available_kinases}')
-        
-        if selected_kinases is not None :
-            self._selected_kinases = selected_kinases
-        else :
-            self._selected_kinases = available_kinases
-        
-        if debug :
-            print(f'selected kinases: {self._selected_kinases}')
         try :
             sequence_format = df[self._column_names['peptide']].apply(lambda x : Scoring.get_sequence_format(x))
         except ValueError as e :
@@ -92,106 +69,98 @@ class Session :
         
         if len(sequence_format.unique()) != 1 :
             raise ValueError(f'Peptide sequence format must be consistent: {sequence_format.unique()}')
-        
+            
         self._mode = sequence_format.unique()[0]
+
+        phospho_column_types = df[self._column_names['peptide']].apply(lambda x: Scoring.get_phosphorylation_site_type(x, self._mode)) 
         
-        phospho_column_types = df[self._column_names['peptide']].apply(lambda x : Scoring.get_phosphorylation_site(x, self._mode))
-        
-        #make sure df[Session.PHOSPHO_TYPE_COLUMN] is uppercase
-        phospho_column_types = phospho_column_types.str.upper()
-        
+        self._orthologs = {}
+        matching = {}
         relevant_columns = [c for c in column_names.values() if c is not None]
-        self._st_df = df[(phospho_column_types == 'S') | (phospho_column_types == 'T')][relevant_columns].copy().reset_index(drop=True)
-        self._y_df = df[phospho_column_types == 'Y'][relevant_columns].copy().reset_index(drop=True)
+        self._dfs = {}
+        organism_orthologs = ortholog_manager.get_orthologs(organism=organism)
+        self._num_peptides = {}
+        self._selected_symbols = selected_symbols.copy()
+        self._supported_kinase_types = set()
+        sorted(self._selected_symbols)
+
+        supported_symbols = set()
+        for phospho_type in phospho_column_types.unique() :
+            if organism_orthologs.is_supported_kinase_type(phospho_type) and phospho_type in scoring and phospho_type in background :
+                self._supported_kinase_types.add(phospho_type)
+                self._orthologs[phospho_type] = organism_orthologs.get_orthologs(gene_id_type=id_type, kinase_type=phospho_type, ambiguous=ambiguous)
+                matching[phospho_type] = MatchWithMapping(scoring=scoring[phospho_type], background=background[phospho_type], mapping=self._orthologs[phospho_type], selected_symbols=self._selected_symbols)
+                supported_symbols |= matching[phospho_type].get_selected_symbols()
+                self._dfs[phospho_type] = df[phospho_column_types == phospho_type][relevant_columns].copy().reset_index(drop=True)
+                self._dfs[phospho_type][Session.CLEAN_PEPTIDE_COLUMN] = self._dfs[phospho_type][self._column_names['peptide']].apply(lambda x: scoring[phospho_type].clean_sequence(x, self._mode))
+                self._dfs[phospho_type][column_names['id']] = Session.handle_special_id_column(self._dfs[phospho_type][column_names['id']], id_type)
+                self._dfs[phospho_type][Session.ID_COLUMN] = Session.build_id_column(self._dfs[phospho_type], column_names, 'id')
+                duplicated_ids = self._dfs[phospho_type][Session.ID_COLUMN].duplicated()
+                if duplicated_ids.any() :
+                    print(f'Warning: Duplicated IDs in {phospho_type} data: {self._dfs[phospho_type][Session.ID_COLUMN][duplicated_ids]}')
+                    #drop duplicates
+                    self._dfs[phospho_type] = self._dfs[phospho_type][~duplicated_ids]
+                self._dfs[phospho_type].set_index(Session.ID_COLUMN, inplace=True)
+                self._num_peptides[phospho_type] = len(self._dfs[phospho_type])
         
-        self._st_df[Session.CLEAN_PEPTIDE_COLUMN] = self._st_df[self._column_names['peptide']].apply(lambda x : matching_st._scoring.clean_sequence(x, self._mode))
-        self._y_df[Session.CLEAN_PEPTIDE_COLUMN] = self._y_df[self._column_names['peptide']].apply(lambda x : matching_y._scoring.clean_sequence(x, self._mode))
-        
-        self._st_ids = Session.build_id_column(self._st_df, column_names, 'id')
-        self._y_ids = Session.build_id_column(self._y_df, column_names, 'id')
-        
-        num_st_peptides = len(self._st_df)
-        num_y_peptides = len(self._y_df)
-                
+        self._selected_symbols = supported_symbols
         if (debug) :
             start_time = perf_counter()
         
-        sorted(self._selected_kinases)
-
-        self._st_percentiles = matching_st.get_percentiles_for_selected_kinases(self._st_df[Session.CLEAN_PEPTIDE_COLUMN], self._selected_kinases, self._mode)
-        self._y_percentiles = matching_y.get_percentiles_for_selected_kinases(self._y_df[Session.CLEAN_PEPTIDE_COLUMN], self._selected_kinases, self._mode)
+        self._percentiles = {}
+        self._kinase_matches = {}
+        self._peptide_matches = {}
         
-        if (debug) :
-            print(f'Number of ST kinases tested : {len(self._st_percentiles)}')
-            print(f'Number of Y kinases tested : {len(self._y_percentiles)}')
-        
-        self._st_kinase_matches = MatchWithMapping.get_kinase_matches_for_peptides(num_st_peptides, self._st_percentiles, match_threshold)
-        self._y_kinase_matches = MatchWithMapping.get_kinase_matches_for_peptides(num_y_peptides, self._y_percentiles, match_threshold)
-        
-        self._st_peptide_matches = dict(sorted(MatchWithMapping.get_peptide_matches_for_kinases(self._st_percentiles, match_threshold).items()))
-        self._y_peptide_matches = dict(sorted(MatchWithMapping.get_peptide_matches_for_kinases(self._y_percentiles, match_threshold).items()))
+        for phospho_type in self._supported_kinase_types :
+            self._percentiles[phospho_type] = matching[phospho_type].get_percentiles_for_selected_kinases(self._dfs[phospho_type][Session.CLEAN_PEPTIDE_COLUMN], self._mode)
+            self._kinase_matches[phospho_type] = MatchWithMapping.get_kinase_matches_for_peptides(self._num_peptides[phospho_type], self._percentiles[phospho_type], match_threshold)
+            self._peptide_matches[phospho_type] = dict(sorted(MatchWithMapping.get_peptide_matches_for_kinases(self._percentiles[phospho_type], match_threshold).items()))
         
         if (debug) :
             print(f'Elapsed time for percentiles and matches: {perf_counter() - start_time:.2f} seconds')
-            
+        
         self._last_accessed = time.time()
     
     def get_percentiles_df(self, kinase_type : str) -> pd.DataFrame :
-        if kinase_type == 'ST' :
-            df = pd.DataFrame(self._st_percentiles, index = self._st_ids)
-            return df
-        elif kinase_type == 'Y' :
-            df = pd.DataFrame(self._y_percentiles, index = self._y_ids)
+        if kinase_type in self._supported_kinase_types :
+            df = pd.DataFrame(self._percentiles[kinase_type], index = self._dfs[kinase_type].index)
             return df
         else :
             raise ValueError(f'Invalid kinase type: {kinase_type}')
     
     def get_kinase_matches_df(self) -> pd.DataFrame :
-        st_matches = [','.join(self._st_kinase_matches[i]) for i in range(len(self._st_kinase_matches))]
-        y_matches = [','.join(self._y_kinase_matches[i]) for i in range(len(self._y_kinase_matches))]
+        matches = {}
+        for kinase_type in self._supported_kinase_types :
+            matches[kinase_type] = [','.join(self._kinase_matches[kinase_type][i]) for i in range(len(self._kinase_matches[kinase_type]))]
+            matches[kinase_type] = zip(self._dfs[kinase_type].index, self._dfs[kinase_type][Session.CLEAN_PEPTIDE_COLUMN], matches[kinase_type])
         
-        st_matches = zip(self._st_ids, self._st_df[Session.CLEAN_PEPTIDE_COLUMN], st_matches)
-        y_matches = zip(self._y_ids, self._y_df[Session.CLEAN_PEPTIDE_COLUMN], y_matches)
-        
-        all_matches = list(st_matches) + list(y_matches)
+        all_matches = []
+        for kinase_type in self._supported_kinase_types :
+            all_matches += list(matches[kinase_type])
         
         return pd.DataFrame(all_matches, columns=[Session.ID_COLUMN, 'peptide', 'kinase_matches'])
     
-    def get_barplot_fig(self) :
-        st_counts = [(k,len(pl)) for k,pl in self._st_peptide_matches.items()]
-        y_counts = [(k,len(pl)) for k,pl in self._y_peptide_matches.items()]
-        
-        st_counts = [('ST', k, f'({self._matching_st._mapping[k]}-like)', n) if '+' in k else ('ST', k, k, n) for k,n, in st_counts if n > 0]
-        y_counts = [('Y', k, f'({self._matching_y._mapping[k]}-like)', n) if '+' in k else ('Y', k, k, n) for k,n, in y_counts if n > 0]
-                
-        
-        all_counts = st_counts + y_counts
-        all_counts = [(t,k,sk,n) if k not in self._dual_specificity_kinases else (t,f'{k}({t})',f'{sk}({t})',n) for t,k,sk,n in all_counts]
-        
-        df = pd.DataFrame(all_counts, columns=['kinase_type', 'kinase', 'kinase_short', 'count'])
-
-        #sort by kinase type then count
-        df = df.sort_values(by=['kinase_type', 'count'], ascending=[False, False])
-        
-        #map color ST -> light blue, Y -> light orange
-        color_map = {'ST' : 'lightblue', 'Y' : 'lightcoral'}
-        fig = px.bar(df, x='count', y='kinase_short', color='kinase_type', color_discrete_map=color_map, hover_data={'kinase_type' : False,
-                                                                                                                     'kinase' : True,
-                                                                                                                     'kinase_short' : False,
-                                                                                                                     'count': True})
+    def get_counts_barplot_fig(self) :
+        counts = [(kt,k,self._orthologs[kt].handle_multispecificity_long(k),len(pl)) for kt in self._supported_kinase_types for k,pl in self._peptide_matches[kt].items()]
+        df = pd.DataFrame(counts, columns=['kinase_type', 'kinase', 'kinase_short', 'count'])
+        df = df.sort_values(by=['kinase_type', 'count'], ascending=[False, True])
+        #color_map = {'ST' : 'lightblue', 'Y' : 'lightcoral'}
+        fig = px.bar(df, x='count', y='kinase_short', color='kinase_type', hover_data={'kinase_type' : False,
+                                                                                       'kinase' : True,
+                                                                                       'kinase_short' : False,
+                                                                                       'count': True})
         fig.update_layout(xaxis_title_text='# peptides', yaxis_title_text='kinase')
         fig.update_layout(xaxis_tickangle=-45)
         fig.update_layout(showlegend=True)
         fig.update_yaxes(showgrid=True)
         
         return fig
-    
+
     @staticmethod
-    def kinase_match_string_wrapper(kinase_matches : List[str], width : int = 20) -> str :
+    def __wrap__text(kinase_matches : Set[str], width : int = 20, sep=',') -> str :
         output_string = ''
         line_length = 0
-        kinase_matches_exploded = [j for k in kinase_matches for j in k.split('+')]
-        sorted(kinase_matches_exploded)
+        kinase_matches_exploded = [j for k in kinase_matches for j in k.split(sep)]
         for k in kinase_matches_exploded :
             if line_length + len(k) > width :
                 output_string += '<br>'
@@ -200,37 +169,28 @@ class Session :
             line_length += len(k) + 1
         return output_string[:-1]
     
-    def get_peptide_scatter_fig(self, selected_kinases : List[str] = []) -> go.Figure :
+    def get_peptide_scatter_fig(self, selected_kinases : Set[str] = set()) -> go.Figure :
         if self._column_names['dependent'] is None :
             raise ValueError('Dependent column must be specified')
         if self._column_names['log2fc'] is None :
             raise ValueError('log2fc column must be specified')
         
-        peptide_scatter_st_df = self._st_df[[self._column_names['dependent'], self._column_names['log2fc']]].copy()
-        peptide_scatter_st_df['id'] = self._st_ids
-        peptide_scatter_st_df['kinase_matches'] = self._st_kinase_matches
+        peptide_scatter_dfs = []
+        for kinase_type in self._supported_kinase_types :
+            peptide_scatter_df = self._dfs[kinase_type][[self._column_names['dependent'], self._column_names['log2fc']]].copy()
+            peptide_scatter_df['id'] = peptide_scatter_df.index
+            peptide_scatter_df['kinase_matches'] = self._kinase_matches[kinase_type]
+            peptide_scatter_dfs.append(peptide_scatter_df)
         
-        peptide_scatter_y_df = self._y_df[[self._column_names['dependent'], self._column_names['log2fc']]].copy()
-        peptide_scatter_y_df['id'] = self._y_ids
-        peptide_scatter_y_df['kinase_matches'] = self._y_kinase_matches
-        
-        
-        peptide_scatter_df = pd.concat([peptide_scatter_st_df, peptide_scatter_y_df])        
-        
-        #set_union_lambda = lambda x: set.union(*x)
-        #peptide_scatter_df = peptide_scatter_df.groupby('id').agg({self._column_names['dependent'] : 'first',
-        #                                                                               self._column_names['log2fc'] : 'first',
-        #                                                                               'kinase_matches' : set_union_lambda}).reset_index()
-        
+        peptide_scatter_df = pd.concat(peptide_scatter_dfs)
+        peptide_scatter_df['kinase'] = peptide_scatter_df['kinase_matches'].apply(lambda x : Session.__wrap__text(x))
         peptide_scatter_df['match'] = peptide_scatter_df['kinase_matches'].apply(lambda x : any(k in selected_kinases for k in x))
-        #peptide_scatter_df['kinase'] = peptide_scatter_df['kinase_matches'].apply(lambda x : ', '.join(x))
-        peptide_scatter_df['kinase'] = peptide_scatter_df['kinase_matches'].apply(lambda x : Session.kinase_match_string_wrapper(x))
-
-        match_string = Session.kinase_match_string_wrapper(selected_kinases)
         
+        selected_kinases = set(sorted(list(selected_kinases)))
+        match_string = Session.__wrap__text(selected_kinases)
         peptide_scatter_df['matched'] = peptide_scatter_df['match'].apply(lambda x : match_string if x else 'unmatched')
         peptide_scatter_df['matched'] = peptide_scatter_df['matched'].astype('category')
-        
+
         fig = px.scatter(peptide_scatter_df, x=self._column_names['log2fc'], y=self._column_names['dependent'], color='matched', hover_data={'matched': False,
                                                                                                                                              self._column_names['log2fc']: True,
                                                                                                                                              self._column_names['dependent']: True,
@@ -241,40 +201,32 @@ class Session :
         return fig
     
     def get_heatmap_fig(self, kinase_type : str) -> go.Figure :
-        if kinase_type == 'ST' :
-            peptide_matches = self._st_percentiles
-            ids = self._st_ids
-            mapping = self._matching_st._mapping
-        elif kinase_type == 'Y' :
-            peptide_matches = self._y_percentiles
-            ids = self._y_ids
-            mapping = self._matching_y._mapping
-        else :
+        if kinase_type not in self._supported_kinase_types :
             raise ValueError(f'Invalid kinase type: {kinase_type}')
+        percentiles = self._percentiles[kinase_type]
+        ids = self._dfs[kinase_type].index
         
-        heatmap_df = pd.DataFrame.from_dict(peptide_matches, orient='index')
+        heatmap_df = pd.DataFrame.from_dict(percentiles, orient='index')
         heatmap_df.columns = ids
-
+        
         Z = linkage(heatmap_df, method='ward', metric='euclidean')
         row_order = dendrogram(Z, no_plot=True)['leaves']
-
+        
         heatmap_df = heatmap_df.iloc[row_order]
-
+        
         heatmap_t_df = heatmap_df.transpose()
         Z = linkage(heatmap_t_df, method='ward', metric='euclidean')
         col_order = dendrogram(Z, no_plot=True)['leaves']
-
+        
         heatmap_df = heatmap_df.iloc[:, col_order]
-        
-        
+
         hover_data = [[f"kin: {kin}<br>pep: {pep}<br>per: {heatmap_df.loc[kin, pep]:.2f}" for pep in heatmap_df.columns] for kin in heatmap_df.index]
         hover_df = pd.DataFrame(hover_data)
         hover_df.columns = heatmap_df.columns
+        
+        heatmap_df.index = [self._orthologs[kinase_type].handle_multispecificity_long(k) for k in heatmap_df.index]
         hover_df.index = heatmap_df.index
-
-        heatmap_df.index = [f'({mapping[k]}-like)' if '-like)' in k else k for k in heatmap_df.index]
-        hover_df.index = heatmap_df.index
-
+        
         fig = go.Figure(data=go.Heatmap(
             z=heatmap_df.values,
             x=heatmap_df.columns,
@@ -289,36 +241,46 @@ class Session :
         fig.update_traces(colorbar_orientation='h')
         
         return fig
-    
-    def get_stat_df(self) -> pd.DataFrame :
-        population_log2fc = pd.concat([self._st_df[self._column_names['log2fc']],self._y_df[self._column_names['log2fc']]], ignore_index=True)
-        population_log2fc = population_log2fc[population_log2fc.notnull()]
-        population_log2fc_mean = np.mean(population_log2fc)
-        population_log2fc_std = np.std(population_log2fc)
+
+    def get_stat_df(self, combine_populations : bool = True) -> pd.DataFrame :
+        log2fcs = {kt:self._dfs[kt][self._column_names['log2fc']] for kt in self._supported_kinase_types}
+        log2fcs = {kt:l[l.notnull()] for kt,l in log2fcs.items()}
+        means = {kt:np.mean(l) for kt,l in log2fcs.items()}
+        stds = {kt:np.std(l) for kt,l in log2fcs.items()}
+        total_n = {kt:len(l) for kt,l in log2fcs.items()}
         
-        log2fc_st_dict = {k : self._st_df.loc[self._st_peptide_matches[k], self._column_names['log2fc']] for k in self._st_peptide_matches.keys()}
-        log2fc_y_dict = {k : self._y_df.loc[self._y_peptide_matches[k], self._column_names['log2fc']] for k in self._y_peptide_matches.keys()}
+        log2fc_dict = {kt : {k: self._dfs[kt].iloc[self._peptide_matches[kt][k]][self._column_names['log2fc']] for k in self._peptide_matches[kt].keys()} for kt in self._supported_kinase_types}
+                
+        log2fc_tuples = {kt : [(self._orthologs[kt].handle_multispecificity_long(k, use_short=False), self._orthologs[kt].handle_multispecificity_long(k), len(l), np.mean(l), np.std(l)) for k,l in ld.items() if len(l) > 0] for kt,ld in log2fc_dict.items()}
+
+        log2fc_dfs = {kt : pd.DataFrame(log2fc_tuples[kt], columns=['kinase', 'short', 'n', 'mean', 'std']) for kt in self._supported_kinase_types}
         
-        log2fc_st_dict = {k if k not in self._dual_specificity_kinases else f'{k}(ST)':l  for k,l in log2fc_st_dict.items()}
-        log2fc_y_dict = {k if k not in self._dual_specificity_kinases else f'{k}(Y)':l  for k,l in log2fc_y_dict.items()}
+        if combine_populations :
+            combined_total_n = sum(total_n.values())
+            mean = sum([m * total_n[kt] for kt,m in means.items()]) / combined_total_n
+            std = np.sqrt(sum([total_n[kt] * (stds[kt] ** 2 + (means[kt] - mean) ** 2) for kt in self._supported_kinase_types]) / combined_total_n)
+            means = {kt:mean for kt in self._supported_kinase_types}
+            stds = {kt:std for kt in self._supported_kinase_types}
+            total_n = {kt:combined_total_n for kt in self._supported_kinase_types}
         
-        log2fc_dict = log2fc_st_dict | log2fc_y_dict
+        for kt in self._supported_kinase_types :
+            log2fc_dfs[kt]['zscore'] = (log2fc_dfs[kt]['mean'] - means[kt]) / (stds[kt] / np.sqrt(log2fc_dfs[kt]['n']))
+            log2fc_dfs[kt]['p'] = log2fc_dfs[kt]['zscore'].apply(lambda x: 1 - norm.cdf(x) if x > 0 else norm.cdf(x))
+            log2fc_dfs[kt]['p_adj'] = fdrcorrection(log2fc_dfs[kt]['p'])[1]
         
-        log2fc_tuples = [(k, len(l), np.mean(l), np.std(l)) for k,l in log2fc_dict.items() if len(l) > 0]
-        log2fc_df = pd.DataFrame(log2fc_tuples, columns=['kinase', 'n', 'mean', 'std'])
-        log2fc_df['zscore'] = (log2fc_df['mean'] - population_log2fc_mean) / (population_log2fc_std / np.sqrt(log2fc_df['n']))
-        log2fc_df['p'] = log2fc_df['zscore'].apply(lambda x: 1 - norm.cdf(x) if x > 0 else norm.cdf(x))
-        log2fc_df['p_adj'] = fdrcorrection(log2fc_df['p'])[1]
+        log2fc_df = pd.concat([df for df in log2fc_dfs.values()], ignore_index=True)
+
+        if combine_populations :
+            log2fc_df['p_adj'] = fdrcorrection(log2fc_df['p'])[1]
         
         return log2fc_df
-    
-    def get_zscore_fig(self, fdr_threshold : float = 0.05) -> go.Figure :
-        zscore_df = self.get_stat_df().copy()
+        
+    def get_zscore_fig(self, fdr_threshold : float = 0.05, combine_populations : bool = True) -> go.Figure :
+        zscore_df = self.get_stat_df(combine_populations).copy()
         zscore_df['zscore_sig'] = zscore_df['p_adj'].apply(lambda x: x <= fdr_threshold)
         
         zscore_df.sort_values(by='zscore', ascending=False, inplace=True)
-        zscore_df['kinase_short'] = zscore_df['kinase'].map(self._shortened_kinase_names)
-        fig = px.bar(zscore_df, x='zscore', y='kinase_short', hover_data={'zscore_sig': False, 'kinase_short' : False, 'zscore' : True, 'p_adj' : True, 'kinase' : True}, color='zscore_sig')
+        fig = px.bar(zscore_df, x='zscore', y='short', hover_data={'zscore_sig': False, 'short' : False, 'zscore' : True, 'p_adj' : True, 'kinase' : True}, color='zscore_sig')
         
         fig.update_layout(yaxis_categoryorder='total ascending')
         fig.update_layout(legend_title_text='FDR <= %0.2f' % fdr_threshold)
@@ -326,8 +288,8 @@ class Session :
         
         return fig
     
-    def get_kinase_scatter_fig(self) :
-        kinase_scatter_df = self.get_stat_df().copy()
+    def get_kinase_scatter_fig(self, combine_populations : bool = True) :
+        kinase_scatter_df = self.get_stat_df(combine_populations).copy()
         kinase_scatter_df.sort_values(by='mean', ascending=False, inplace=True)
         smallest_non_zero = kinase_scatter_df[kinase_scatter_df['p_adj'] > 0]['p_adj'].min()
         neglog_smallest_non_zero = -math.log10(smallest_non_zero)
@@ -340,6 +302,127 @@ class Session :
         fig.update_yaxes(showgrid=True)
         
         return fig
+    def convert_network_to_cytoscape(self,
+                                     network_df : pd.DataFrame,
+                                     node1_col : str = 'substrate_id',
+                                     node2_col : str = 'kinase',
+                                     kinase_to_kinase_col : str = 'kinase_to_kinase',
+                                     highlighted_symbols : Set[str] = set()) -> cyto.Cytoscape :
+
+        network_df = network_df.copy()
+        kinase_nodes = set(network_df[node2_col]) | set(network_df[network_df[kinase_to_kinase_col]][node1_col])
+        nodes = set(network_df[node1_col]) | kinase_nodes
+        stylesheet = [
+            {
+                'selector': 'node',
+                'style': {
+                    'label': 'data(id)'
+                }
+            },
+            {
+                'selector' : '.kinase',
+                'style' : {'background-color' : 'blue'}
+            },
+            {
+                'selector' : '.highlighted',
+                'style' : {'background-color' : 'orange'}
+            },
+            {
+                'selector' : '.substrate',
+                'style' : {'background-color' : 'grey'}
+            },
+            {
+                'selector' : 'edge',
+                'style' : {'target-arrow-shape' : 'triangle', 'target-arrow-color' : 'green', 'target-arrow-fill' : 'filled','curve-style': 'bezier'}
+            }
+
+        ]
+        
+        nodes = [{'data' : {'id' : n, 'label' : n}, 'classes' : 'highlighted' if n in highlighted_symbols else 'kinase' if n in kinase_nodes else 'substrate'} for n in nodes]
+        edges = [{'data' : {'source' : s, 'target' : t}} for s,t in zip(network_df['kinase'], network_df['substrate_id'])]
+        
+        elements = nodes + edges
+        cyto_plot = cyto.Cytoscape(
+            id='kinase_network',
+            layout={'name': 'klay', 'animate': True},
+            style={'width': '100%', 'height': '1000px'},
+            stylesheet=stylesheet,
+            elements=elements
+        )
+
+        return cyto_plot
+    
+    def get_network_df(self) -> pd.DataFrame :
+        if self._network_df is not None :
+            return self._network_df.copy()
+        
+        network_dfs = []
+        for kinase_type in self._supported_kinase_types :
+            percentiles_df = pd.DataFrame.from_dict(self._percentiles[kinase_type], orient='columns')
+            if len(percentiles_df) != len(self._dfs[kinase_type]) :
+                raise ValueError('Percentiles and source dataframes must have the same length')
+            percentiles_df['substrate_id'] = self._dfs[kinase_type][self._column_names['id']].reset_index(drop=True)
+            network_df = pd.melt(percentiles_df, id_vars=['substrate_id'], value_vars=self._percentiles[kinase_type].keys(), var_name='kinase', value_name='percentile')
+            network_dfs.append(network_df)
+        network_df = pd.concat(network_dfs)
+        
+        network_df['kinase_to_kinase'] = False
+        for kinase_type in self._supported_kinase_types :
+            long_names = set(self._orthologs[kinase_type].get_long_names())
+            long_name_from_id_dict = self._orthologs[kinase_type].get_long_name_from_id_dict()
+            network_df['substrate_id'] = network_df['substrate_id'].apply(lambda x: long_name_from_id_dict.get(x, x))
+            network_df['kinase_to_kinase'] = network_df.apply(lambda x: (x['substrate_id'] in long_names) or x['kinase_to_kinase'], axis=1)
+            
+        network_df.sort_values(by='percentile', ascending=False, inplace=True)
+        network_df.drop_duplicates(subset=['substrate_id', 'kinase'], inplace=True)
+        
+        network_df['kinase'] = network_df['kinase'].map(lambda x: self._orthologs[kinase_type].get_longest_long_dict().get(x, x))
+        network_df['substrate_id'] = network_df['substrate_id'].map(lambda x: self._orthologs[kinase_type].get_longest_long_dict().get(x, x))
+        
+        self._network_df = network_df.copy()
+        
+        return network_df
+    
+    def get_kinase_only_network_df(self) -> pd.DataFrame :
+        network_df = self.get_network_df()
+        network_df = network_df[network_df['kinase_to_kinase']]
+        return network_df
+    
+    def get_kinase_hub_network_df(self, selected_symbols_longest : Set[str] = set()) -> pd.DataFrame :
+        network_df = self.get_network_df()
+        network_df = network_df[network_df['kinase'].isin(selected_symbols_longest) | network_df['substrate_id'].isin(selected_symbols_longest)]
+
+        return network_df
+    
+    def get_kinase_hub_fig(self, selected_symbols : Set[str] = set(), threshold : float = 90.0, kinase_only : bool = True) -> cyto.Cytoscape :
+        selected_symbols_longest = {self._orthologs[kt].get_longest_long_dict().get(k, k) for kt in self._supported_kinase_types for k in selected_symbols}
+        hub_network_df = self.get_kinase_hub_network_df(selected_symbols_longest)
+        hub_network_df = hub_network_df[hub_network_df['percentile'] >= threshold]
+        if kinase_only :
+            hub_network_df = hub_network_df[hub_network_df['kinase_to_kinase']]
+        
+        highlighted_symbols_short = {self._orthologs[kt].get_short(k) for kt in self._supported_kinase_types for k in selected_symbols}
+        
+        for kinase_type in self._supported_kinase_types :
+            hub_network_df['kinase'] = hub_network_df['kinase'].map(lambda x: self._orthologs[kinase_type].get_short(x))
+            hub_network_df['substrate_id'] = hub_network_df['substrate_id'].map(lambda x: self._orthologs[kinase_type].get_short(x))
+        
+        return self.convert_network_to_cytoscape(hub_network_df, highlighted_symbols=highlighted_symbols_short)
+    
+    def get_full_kinase_network_fig(self, threshold : float = 99.0) -> cyto.Cytoscape :
+        full_network_df = self.get_kinase_only_network_df()
+        full_network_df = full_network_df[full_network_df['percentile'] >= threshold]
+
+        for kinase_type in self._supported_kinase_types :
+            full_network_df['kinase'] = full_network_df['kinase'].map(lambda x: self._orthologs[kinase_type].get_short(x))
+            full_network_df['substrate_id'] = full_network_df['substrate_id'].map(lambda x: self._orthologs[kinase_type].get_short(x))
+        return self.convert_network_to_cytoscape(full_network_df)
+
+    
+    
+    
+    
+
 
 
 
