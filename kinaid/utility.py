@@ -377,7 +377,7 @@ class Utility :
         df['gene_id'] = df['species_entrez_id']
         
         df.sort_values(by=['kinase_type', 'symbol','weighted_score'],
-                       ascending = False, inplace=True)
+                       ascending = [True,True,False], inplace=True)
         
         df_group = df.groupby(['kinase_type', 'symbol'])['kinase_name'].agg(list).reset_index()
         df_group['ambiguous'] = df_group.apply(lambda x: len(x['kinase_name']) > 1, axis=1)
