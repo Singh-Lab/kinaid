@@ -13,13 +13,15 @@ from scipy.stats import norm
 from statsmodels.stats.multitest import fdrcorrection
 import math
 import dash_cytoscape as cyto
-
+from plotly.subplots import make_subplots
 
 
 
 class Session :
     ID_COLUMN: Final[str] = '__ENTRY_ID'
     CLEAN_PEPTIDE_COLUMN: Final[str] = '__CLEAN_PEPTIDE'
+    cyto.load_extra_layouts()
+
     
 
     @staticmethod
@@ -61,7 +63,7 @@ class Session :
         self._organism = organism
         self._column_names = column_names
         self._network_df = None
-        
+                
         try :
             sequence_format = df[self._column_names['peptide']].apply(lambda x : Scoring.get_sequence_format(x))
         except ValueError as e :
@@ -80,17 +82,19 @@ class Session :
         self._dfs = {}
         organism_orthologs = ortholog_manager.get_orthologs(organism=organism)
         self._num_peptides = {}
-        self._selected_symbols = selected_symbols.copy()
-        self._supported_kinase_types = set()
-        sorted(self._selected_symbols)
+        self._all_selected_symbols = selected_symbols.copy()
+        self._supported_kinase_types = list()
+        sorted(self._all_selected_symbols)
+        self._selected_symbols = {}
 
         supported_symbols = set()
-        for phospho_type in phospho_column_types.unique() :
+        for phospho_type in sorted(phospho_column_types.unique()) :
             if organism_orthologs.is_supported_kinase_type(phospho_type) and phospho_type in scoring and phospho_type in background :
-                self._supported_kinase_types.add(phospho_type)
+                self._supported_kinase_types.append(phospho_type)
                 self._orthologs[phospho_type] = organism_orthologs.get_orthologs(gene_id_type=id_type, kinase_type=phospho_type, ambiguous=ambiguous)
-                matching[phospho_type] = MatchWithMapping(scoring=scoring[phospho_type], background=background[phospho_type], mapping=self._orthologs[phospho_type], selected_symbols=self._selected_symbols)
-                supported_symbols |= matching[phospho_type].get_selected_symbols()
+                matching[phospho_type] = MatchWithMapping(scoring=scoring[phospho_type], background=background[phospho_type], mapping=self._orthologs[phospho_type], selected_symbols=self._all_selected_symbols)
+                self._selected_symbols[phospho_type] = matching[phospho_type].get_selected_symbols()
+                supported_symbols |= self._selected_symbols[phospho_type]
                 self._dfs[phospho_type] = df[phospho_column_types == phospho_type][relevant_columns].copy().reset_index(drop=True)
                 self._dfs[phospho_type][Session.CLEAN_PEPTIDE_COLUMN] = self._dfs[phospho_type][self._column_names['peptide']].apply(lambda x: scoring[phospho_type].clean_sequence(x, self._mode))
                 self._dfs[phospho_type][column_names['id']] = Session.handle_special_id_column(self._dfs[phospho_type][column_names['id']], id_type)
@@ -103,7 +107,10 @@ class Session :
                 self._dfs[phospho_type].set_index(Session.ID_COLUMN, inplace=True)
                 self._num_peptides[phospho_type] = len(self._dfs[phospho_type])
         
-        self._selected_symbols = supported_symbols
+        self._supported_kinase_types = sorted(self._supported_kinase_types)
+        self._supported_kinase_types = set(self._supported_kinase_types)
+        self._all_selected_symbols = supported_symbols
+        
         if (debug) :
             start_time = perf_counter()
         
@@ -200,7 +207,7 @@ class Session :
         
         return fig
     
-    def get_heatmap_fig(self, kinase_type : str) -> go.Figure :
+    def get_heatmap_fig(self, kinase_type : str, coloraxis : str ='coloraxis') -> go.Figure :
         if kinase_type not in self._supported_kinase_types :
             raise ValueError(f'Invalid kinase type: {kinase_type}')
         percentiles = self._percentiles[kinase_type]
@@ -231,6 +238,7 @@ class Session :
             z=heatmap_df.values,
             x=heatmap_df.columns,
             y=heatmap_df.index,
+            coloraxis=coloraxis,
             colorscale='Viridis',
             hoverinfo='text',
             text=hover_df.values)
@@ -238,10 +246,38 @@ class Session :
         
         fig.update_xaxes(showticklabels=False)
 
-        fig.update_traces(colorbar_orientation='h')
+        #fig.update_traces(colorbar_orientation='h')
+        #fig.update_layout(coloraxis = {'colorscale':'viridis', colorbar=dict(title='percentile')},)
+        fig.update_layout(coloraxis = dict(colorscale='viridis',
+                                           colorbar=dict(title='percentile', orientation='h'),
+                                           cmin=0,
+                                           cmax=100))
         
         return fig
 
+    def get_all_heatmap_figs(self) -> go.Figure :
+        kinase_types = sorted(self._supported_kinase_types)
+        figure_heights = [len(self._selected_symbols[kt]) for kt in kinase_types]
+        total_height = sum(figure_heights)
+        figure_heights = [h / total_height for h in figure_heights]
+                
+        fig = make_subplots(rows=len(kinase_types), cols=1, shared_xaxes=False, vertical_spacing=0.02, row_heights=figure_heights)
+        for row,kt in enumerate(kinase_types) :
+            hfig = self.get_heatmap_fig(kt)
+            trace = hfig.data[0]
+            fig.add_trace(trace, row=row+1, col=1)
+            fig.update_xaxes(showticklabels=False, row=row+1, col=1)
+        
+        fig.update_layout(coloraxis = dict(colorscale='viridis',
+                                           colorbar=dict(title='percentile',
+                                                         orientation='h'),
+                                           cmin=0,
+                                           cmax=100),
+                          margin=dict(t=100, b=20, l=20, r=20))
+        #fig.update_traces(colorbar_orientation='h')
+
+        return fig
+    
     def get_stat_df(self, combine_populations : bool = True) -> pd.DataFrame :
         log2fcs = {kt:self._dfs[kt][self._column_names['log2fc']] for kt in self._supported_kinase_types}
         log2fcs = {kt:l[l.notnull()] for kt,l in log2fcs.items()}
@@ -418,9 +454,37 @@ class Session :
             full_network_df['substrate_id'] = full_network_df['substrate_id'].map(lambda x: self._orthologs[kinase_type].get_short(x))
         return self.convert_network_to_cytoscape(full_network_df)
 
+    def get_figure_by_name(self, name : str):
+        self.last_accessed = time.time()
+        
+        if name == 'barplot':
+            return self.get_counts_barplot_fig()
+        elif name == 'peptide_scatter':
+            return self.get_peptide_scatter_fig()
+        elif name == 'heatmap':
+            return self.get_all_heatmap_figs()
+        elif name == 'zscore':
+            return self.get_zscore_fig()
+        elif name == 'kinase_scatter':
+            return self.get_kinase_scatter_fig()
+        elif name == 'network':
+            return self.get_full_kinase_network_fig()
+        elif name == 'hub':
+            return self.get_kinase_hub_fig()
+        else:
+            return None
     
-    
-    
+    def get_figure_style_by_name(self, name : str) :
+        self.last_accessed = time.time()
+        #get number of kinases from self.kinase_peptides
+        num_kinases = len(self._all_selected_symbols)
+        plot_height = 1.2 * num_kinases
+        plot_style = {'height': '%drem' % plot_height}
+
+        if name in ['zscore', 'barplot', 'heatmap'] :
+            return plot_style
+        else :
+            return {'height': '50rem'}
     
 
 

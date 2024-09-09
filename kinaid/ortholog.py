@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict
+from typing import List, Dict, Set
 import pandas as pd
 
 class OrthologsWithGeneType :
@@ -95,7 +95,7 @@ class OrthologsWithGeneType :
         print(f'Number of covered symbols: {len(self._covered_symbols)}')
         
 class OrganismOrthologs:
-    def __init__(self, organism : str, ortholog_file : str) :
+    def __init__(self, organism : str, ortholog_file : str, debug = False) :
         self.organism = organism
         self.ortholog_file = ortholog_file
         self.ortholog_df = pd.read_csv(ortholog_file, sep = '\t')
@@ -124,10 +124,12 @@ class OrganismOrthologs:
                                                      self._multispecificity_longs[gene_id_type],
                                                      longest_long[gene_id_type])
                     self.orthologs[(gene_id_type, kinase_type, ambiguous)] = ortholog
-                    ortholog.print_stats()
+                    if debug :
+                        ortholog.print_stats()
                     
     
     def get_orthologs(self, gene_id_type: str, kinase_type: str, ambiguous: bool) -> OrthologsWithGeneType :
+        #print(gene_id_type, kinase_type, ambiguous)
         return self.orthologs[(gene_id_type, kinase_type, ambiguous)]
         
     def is_supported_kinase_type(self, kinase_type : str) -> bool :
@@ -136,23 +138,52 @@ class OrganismOrthologs:
     def get_available_id_types(self) -> List[str] :
         return self._gene_id_types
     
+    def get_supported_kinase_types(self) -> Set[str] :
+        return self._kinase_types
+    
+    def get_all_kinase_symbols_for_gene_id(self, gene_id_type : str, ambiguous : bool = True) -> List[str] :
+        
+        kinase_symbols_long = set([ln for kinase_type in self._kinase_types for ln in self.get_orthologs(gene_id_type, kinase_type, ambiguous).get_long_names()])
+        return kinase_symbols_long
+      
 class OrthologManager:
         
-    def __init__(self, orthology_dir : str, suffix : str = '_orthologs_final.tsv', debug : bool = False) :
+    def __init__(self, orthology_dir : str,
+                 suffix : str = '_orthologs_final.tsv',
+                 organisms : List[str] = [],
+                 human_kinase_file : str = None,
+                 debug = False) :
         #get the list of files in the directory with the '_orthologs_final.tsv' extension
         self.ortholog_dir = orthology_dir
-        self.ortholog_files = [f for f in os.listdir(orthology_dir) if f.endswith(suffix)]
-        self.organism_list = [f.split('_')[0] for f in self.ortholog_files]
-        
+        if organisms is None or len(organisms) == 0 :
+            ortholog_files = [f for f in os.listdir(orthology_dir) if f.endswith(suffix)]
+            self.organism_list = [f.split('_')[0] for f in ortholog_files]
+        else :
+            ortholog_files = [os.path.join(orthology_dir, organism + suffix) for organism in organisms if organism != 'human']
+            if not all([os.path.exists(f) for f in ortholog_files]) :
+                raise ValueError('Not all ortholog files exist')
+            self.organism_list = list(organisms)
+            
+            
         self._organism_ortho_dict = {}
         for organism in self.organism_list:
-            print(organism)
-            self._organism_ortho_dict[organism] = OrganismOrthologs(organism, os.path.join(orthology_dir, organism + suffix))
+            if debug: 
+                print(organism)
+            if organism != 'human' :
+                self._organism_ortho_dict[organism] = OrganismOrthologs(organism, os.path.join(orthology_dir, organism + suffix))
+        
+        if human_kinase_file is not None :
+            if debug:
+                print('Human')
+            human_orthologs = OrganismOrthologs('human', human_kinase_file)
+            self.organism_list.append('human')
+            self._organism_ortho_dict['human'] = human_orthologs
+            
     
     def get_orthologs(self, organism : str, gene_id_type : str = None, kinase_type : str = None, ambiguous : bool = True) -> OrthologsWithGeneType :
         if gene_id_type is not None and kinase_type is not None :
             return self._organism_ortho_dict[organism].get_orthologs(gene_id_type, kinase_type, ambiguous)
         else :
-            return self._organism_ortho_dict[organism]    
+            return self._organism_ortho_dict[organism]
 if __name__ == '__main__' :
     ortholog_manager = OrthologManager('orthologs')

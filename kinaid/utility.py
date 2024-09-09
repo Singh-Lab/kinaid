@@ -379,6 +379,14 @@ class Utility :
         df.sort_values(by=['kinase_type', 'symbol','weighted_score'],
                        ascending = [True,True,False], inplace=True)
         
+        #create a column called is_max_weighted_score that is True if the weighted_score is the max for the kinase_type and symbol
+        df['is_max_weighted_score'] = df.groupby(['kinase_type', 'symbol'])['weighted_score'].transform('max') == df['weighted_score']
+        
+        df_group_by_max_weighted_score = df[df['is_max_weighted_score']].groupby(['kinase_type', 'symbol'])['weighted_score'].agg(list).reset_index()
+        df_group_by_max_weighted_score['ambiguous'] = df_group_by_max_weighted_score.apply(lambda x: len(x['weighted_score']) > 1, axis=1)
+        
+        print(f'{ortholog_file} : {len(df_group_by_max_weighted_score[df_group_by_max_weighted_score["ambiguous"]])}')
+        
         df_group = df.groupby(['kinase_type', 'symbol'])['kinase_name'].agg(list).reset_index()
         df_group['ambiguous'] = df_group.apply(lambda x: len(x['kinase_name']) > 1, axis=1)
         
@@ -386,7 +394,6 @@ class Utility :
         ambiguous_df = df_group[['kinase_type', 'symbol', 'ambiguous']].copy()
         #ambiguous_df = ambiguous_df[ambiguous_df['ambiguous']]
         ambiguous_dict = ambiguous_df.set_index(['kinase_type', 'symbol'])['ambiguous'].to_dict()
-        
 
         df.drop_duplicates(subset=['kinase_type', 'symbol'], keep='first', inplace=True)
         
@@ -635,6 +642,9 @@ class Utility :
         
         #sort df by kinase_type, gene_id_type, and kinase_name
         df = df.sort_values(by=['kinase_type', 'gene_id_type', 'kinase_name'])
+        df['short'] = df['symbol']
+        df['long'] = df['symbol']
+        df['ambiguous'] = False
         
         df.to_csv(output_file, sep='\t', index=False)
     
