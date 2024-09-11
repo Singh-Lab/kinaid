@@ -170,7 +170,7 @@ class OrthologManager:
             if debug: 
                 print(organism)
             if organism != 'human' :
-                self._organism_ortho_dict[organism] = OrganismOrthologs(organism, os.path.join(orthology_dir, organism + suffix))
+                self._organism_ortho_dict[organism] = OrganismOrthologs(organism, os.path.join(orthology_dir, organism + suffix), debug=debug)
         
         if human_kinase_file is not None :
             if debug:

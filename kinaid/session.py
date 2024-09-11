@@ -65,7 +65,7 @@ class Session :
         self._network_df = None
                 
         try :
-            sequence_format = df[self._column_names['peptide']].apply(lambda x : Scoring.get_sequence_format(x))
+            sequence_format = df.apply(lambda x: Scoring.get_sequence_format(x[column_names['peptide']], x.name), axis=1)
         except ValueError as e :
             raise ValueError(f'Error in peptide sequence format: {e}')
         

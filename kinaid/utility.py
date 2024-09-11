@@ -571,10 +571,16 @@ class Utility :
         return df_new, unmapped_kinases
     
     @staticmethod
-    def get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot, remove_tyr = True) :
+    def get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot, remove_tyr = True, ST_matrices_exist : Set[str] = None, Y_matrices_exist : Set[str] = None) :
         st_kinases_df = pd.read_excel(ST_matrix_to_uniprot, sheet_name='Table S1 Data')
         st_kinase_dict = dict(zip(st_kinases_df['Matrix_name'], st_kinases_df['Uniprot id']))
         
+        if ST_matrices_exist is not None:
+            does_not_exist = {m for m in st_kinase_dict if m not in ST_matrices_exist}
+            if(len(does_not_exist) > 0):
+                print(f'Warning: The following ST matrices do not exist: {",".join(does_not_exist)}')
+            st_kinase_dict = {k: v for k, v in st_kinase_dict.items() if k in ST_matrices_exist}
+            
         y_kinases_df = pd.read_excel(Y_matrix_to_uniprot, sheet_name='Table_S1_Data')
         
         #remove rows that have entry in the SUBTYPE column
@@ -583,6 +589,12 @@ class Utility :
         
         if remove_tyr:
             y_kinase_dict = {k.split('_TYR')[0]: u for k, u in y_kinase_dict.items()}
+            
+        if Y_matrices_exist is not None:
+            does_not_exist = {m for m in y_kinase_dict if m not in Y_matrices_exist}
+            if(len(does_not_exist) > 0):
+                print(f'Warning: The following Y matrices do not exist: {",".join(does_not_exist)}')
+            y_kinase_dict = {k: v for k, v in y_kinase_dict.items() if k in Y_matrices_exist}
         
         st_kinases_uniprot = set(st_kinase_dict.values())
         y_kinases_uniprot = set(y_kinase_dict.values())
@@ -608,7 +620,7 @@ class Utility :
         return human_kinases_uniprot_to_entrez_dict, human_kinases_entrez_to_uniprot_dict, uniprot_to_human_kinase_dict, human_entrez_ids, unmapped_ids
     
     @staticmethod
-    def build_human_kinase_database(data_dir : str, output_file : str) :
+    def build_human_kinase_database(data_dir : str, output_file : str, ST_matrices : PWM_Matrices = None, Y_matrices : PWM_Matrices = None) :
         ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
         ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
 
@@ -622,8 +634,17 @@ class Utility :
 
         if not os.path.exists(Y_matrix_to_uniprot):
             Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
-            
-        st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict = Utility.get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot)
+        
+        if ST_matrices is not None:
+            ST_matrices_exist = set(ST_matrices.get_kinase_names())
+        else:
+            ST_matrices_exist = None
+        
+        if Y_matrices is not None:
+            Y_matrices_exist = set(Y_matrices.get_kinase_names())
+        else:
+            Y_matrices_exist = None
+        st_kinases_uniprot, y_kinases_uniprot, st_kinase_dict, y_kinase_dict = Utility.get_human_kinase_ids(ST_matrix_to_uniprot, Y_matrix_to_uniprot, ST_matrices_exist=ST_matrices_exist, Y_matrices_exist=Y_matrices_exist)
         human_kinases_uniprot_to_entrez_st_dict,_,_,_,unmapped_st = Utility.get_human_kinase_geneIDs(st_kinases_uniprot, st_kinase_dict)        
         human_kinases_uniprot_to_entrez_y_dict,_,_,_,unmapped_y = Utility.get_human_kinase_geneIDs(y_kinases_uniprot, y_kinase_dict)
 
@@ -790,7 +811,7 @@ def DefaultConfiguration(threads : int = 8) :
     human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
     if not os.path.exists(human_kinases_database_file):
         print('Creating id mapping of human kinases')
-        Utility.build_human_kinase_database(data_dir, human_kinases_database_file)
+        Utility.build_human_kinase_database(data_dir, human_kinases_database_file, ST_matrices, Y_matrices)
     
     
     kinase_to_uniprot_st_dict, entrez_to_kinase_st_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'ST')

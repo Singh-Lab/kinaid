@@ -150,7 +150,8 @@ class Scoring:
         elif sequence[len(sequence) // 2] in Scoring.__valid_phosphorylation_sites__:
             return 'center'
         else:
-            raise ValueError(f'Invalid sequence format @ {index+1}: invalid phosphorylated site')
+            print(sequence)
+            raise ValueError(f'Invalid sequence format @ {index+1}: invalid phosphorylated site w {sequence[len(sequence) // 2]}')
     
     
     @staticmethod
@@ -334,7 +335,7 @@ class MatchWithMapping(Match) :
         
         self._mapped_kinase_names = mapping.get_kinase_names()
         if not all(k in scoring._kinase_names for k in self._mapped_kinase_names) :
-            print(set(scoring._kinase_names) - set(self._mapped_kinase_names))
+            print(set(self._mapped_kinase_names) - set(scoring._kinase_names))
             raise ValueError('Invalid kinase names in mapping')
         
         if selected_symbols is None or len(selected_symbols) == 0 :
