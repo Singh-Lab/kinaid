@@ -75,7 +75,7 @@ class Utility :
     def get_map_ids_results(job_id : str,
                             url : str = 'https://rest.uniprot.org/idmapping/stream/',
                             exponential_backoff : bool = True,
-                            max_tries : int = 5) -> dict:
+                            max_tries : int = 10) -> dict:
         
         url = url + job_id
 
@@ -122,7 +122,7 @@ class Utility :
                     species_specific : bool =True,
                     confidence = 'moderate',
                     exponential_backoff : bool = True,
-                    max_tries : int = 5,
+                    max_tries : int = 10,
                     debug = False) -> list :
         id = str(gene)
         url = f'{url}/{in_taxon}/{id}/{out_taxon}/{endpoint}'

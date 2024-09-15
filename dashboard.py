@@ -14,7 +14,7 @@ __version__ = '1.0'
 __license__ = 'MIT'
 __email__ = 'javeda@princeton.edu'
 
-from dash import Dash, dcc, html, dash_table, Input, Output, State, no_update, ALL, MATCH
+from dash import Dash, dcc, html, dash_table, Input, Output, State, no_update, ALL, MATCH, callback_context
 import dash_bootstrap_components as dbc
 import uuid
 import pandas as pd
@@ -283,7 +283,7 @@ def process_df_columns(df, organism) :
     #make sure id column is string
     df[value_dict['id']] = df[value_dict['id']].astype(str)
     ids = df[value_dict['id']].tolist()
-    id_type_value = guess_id_type(ids, organism) 
+    id_type_value = guess_id_type(ids, organism)
   out = (
     all_column_options,
     [value_dict[c] for c in columns],
@@ -1168,7 +1168,7 @@ Callbacks
 @app.callback([Output('kinase-selection', 'value'),
                 Output('kinase-selection', 'options'),
                 Output('id-type-dropdown', 'options'),
-                Output('id-type-dropdown', 'value'),
+                #Output('id-type-dropdown', 'value', allow_duplicate=True),
                 Output('upload-button', 'disabled'),
                 Output('upload-data', 'disabled')],
               Input('organism-radioitems', 'value'),
@@ -1182,10 +1182,11 @@ def click_organism(organism : str, ambiguous : str):
     
   Update the kinase selection dropdown and id types dropdown
   '''
+  print(callback_context.triggered_prop_ids)
   available_id_types = list(ortholog_manager.get_orthologs(organism).get_available_id_types())
   symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(available_id_types[0], ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False))
   symbol_options = [{'label': k, 'value': k} for k in symbol_names]
-  return (symbol_names, symbol_options, available_id_types, available_id_types[0], False, False)
+  return (symbol_names, symbol_options, available_id_types, False, False)
 
 
 @app.callback([
@@ -1414,13 +1415,13 @@ def press_submit(
     
     return ('Finished', result_table, kinase_names, kinase_names, threshold, download_section, True)
 
-@app.callback(
-  [Output('upload-data', 'contents'),
-  Output('upload-data', 'filename'),
-  Output('organism-radioitems', 'value'),
-  Output('upload-button', 'disabled',allow_duplicate=True)],
-  Input('example-button', 'n_clicks'),
-  prevent_initial_call=True
+@app.callback(   
+  [Output('organism-radioitems', 'value'),
+   Output('upload-data', 'contents'),
+   Output('upload-data', 'filename'),
+   Output('upload-button', 'disabled',allow_duplicate=True)],
+   Input('example-button', 'n_clicks'),
+   prevent_initial_call=True
 )
 def click_example(n_clicks) :
   '''
@@ -1435,7 +1436,7 @@ def click_example(n_clicks) :
 
   #make it look like an uploaded file with utf-8 encoding and base64 encoding
   csv_string = 'data:text/csv;charset=utf-8;base64,' + base64.b64encode(csv_string.encode()).decode()
-  return csv_string, example_filename, 'yeast', False
+  return 'yeast', csv_string, example_filename, False
 
 
 @app.callback([
