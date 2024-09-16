@@ -30,6 +30,7 @@ from kinaid.session import Session
 from icecream import ic
 from typing import List
 import dash_cytoscape as cyto
+import zipfile
 
 
 
@@ -691,7 +692,6 @@ download_section = dbc.Row([
             dbc.RadioItems(
               id='download-radioitems',
               options=[
-                {'label': 'Download scores', 'value': 'scores'},
                 {'label': 'Download percentiles', 'value': 'percentiles'},
                 {'label': 'Download network', 'value': 'network'},
                 {'label': 'Download kinase network', 'value': 'kinase_network'},
@@ -1570,6 +1570,68 @@ def update_hub_figure(active, kinase_names, threshold, kinase_only, session, sta
   fig = kinaid_session.get_kinase_hub_fig(kinase_names, threshold, kinase_only)
 
   return fig, False
+
+def write_archive(df_list : List[pd.DataFrame], fileNameList : List[str]) -> bytes:
+    bytes_io = io.BytesIO()
+    with zipfile.ZipFile(bytes_io, mode="w") as zf:
+        for df,fn in zip(df_list,fileNameList):
+            df_bytes=df.to_csv(index=False).encode('utf-8')
+            zf.writestr(fn ,df_bytes)
+    return bytes_io.getvalue()
+            
+@app.callback([
+                Output('download-csv', 'data'),
+                Output('timeout-popup', 'displayed', allow_duplicate=True),
+              ],
+              Input('download-button', 'n_clicks'),
+              [
+                State('session-id', 'data'),
+                State('session-started', 'data'),
+                State('download-radioitems', 'value'),
+                State('upload-data', 'filename')
+              ],
+              prevent_initial_call=True,
+)
+def download_csv(n_clicks, session, started, dataframe_name, filename) :
+  if n_clicks is None or n_clicks == 0 :
+    return no_update
+  
+  if not started :
+    return no_update
+  
+  if session not in cache :
+    print('Session not in cache')
+    return no_update, True
+    
+  cache_lock.acquire()
+  kinaid_session = cache[session]
+  cache[session] = kinaid_session
+  cache_lock.release()
+
+
+  if dataframe_name == 'percentiles' :
+    dfs_dict = kinaid_session.get_percentiles_dfs()
+    df_list = list(dfs_dict.values())
+    fileNameList = [f'{kt}_percentiles.csv'for kt in dfs_dict.keys()]
+    bytes_io = write_archive(df_list, fileNameList)
+    out_file = filename.split('.')[0] + '_percentiles.zip'
+
+    return dcc.send_bytes(bytes_io, "zipFileName.zip")
+  elif dataframe_name == 'network' :
+    df = kinaid_session.get_network_df()
+    out_file = filename.split('.')[0] + '_network.csv'
+    return dcc.send_data_frame(df.to_csv, out_file), False
+  elif dataframe_name == 'kinase_network' :
+    df = kinaid_session.get_kinase_only_network_df()
+    out_file = filename.split('.')[0] + '_kinase_network.csv'
+    return dcc.send_data_frame(df.to_csv, out_file), False
+  elif dataframe_name == 'kinase_stats' :
+    df = kinaid_session.get_stat_df()
+    out_file = filename.split('.')[0] + '_kinase_stats.csv'
+    return dcc.send_data_frame(df.to_csv, out_file), False
+
+  return no_update, False
+
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port='8060', debug=True)

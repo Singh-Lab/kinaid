@@ -150,7 +150,6 @@ class Scoring:
         elif sequence[len(sequence) // 2] in Scoring.__valid_phosphorylation_sites__:
             return 'center'
         else:
-            print(sequence)
             raise ValueError(f'Invalid sequence format @ {index+1}: invalid phosphorylated site w {sequence[len(sequence) // 2]}')
     
     

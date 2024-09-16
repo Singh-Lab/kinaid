@@ -134,6 +134,9 @@ class Session :
             return df
         else :
             raise ValueError(f'Invalid kinase type: {kinase_type}')
+        
+    def get_percentiles_dfs(self) -> Dict[str, pd.DataFrame] :
+        return {kt : self.get_percentiles_df(kt) for kt in self._supported_kinase_types}
     
     def get_kinase_matches_df(self) -> pd.DataFrame :
         matches = {}
