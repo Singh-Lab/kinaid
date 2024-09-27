@@ -714,203 +714,203 @@ class Utility :
         #output_file = output_file.replace('.tsv', '_2.tsv')
         df_final.to_csv(output_file, sep='\t', index=False)
 
-@staticmethod        
-def DefaultConfiguration(threads : int = 8) :
-    data_dir = './data'
-    
-    if not os.path.exists(data_dir):
-        print('Creating data directory')
-        os.makedirs(data_dir)
-
-    johnson_ST_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM4_ESM.xlsx'
-    johnson_ST_matrices_original_file = os.path.join(data_dir,'johnson_ST_matrices.xlsx')
-
-    if not os.path.exists(johnson_ST_matrices_original_file):
-        print('Downloading ST matrices')
-        Utility.download_file(johnson_ST_matrices_url, johnson_ST_matrices_original_file)
+    @staticmethod        
+    def DefaultConfiguration(threads : int = 8) :
+        data_dir = './data'
         
-    johnson_ST_matrices_file = os.path.join(data_dir,'ST-Kinases.xlsx')
-    if not os.path.exists(johnson_ST_matrices_file):
-        print('Rearranging ST matrices')
-        PWM_Matrices.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_norm_scaled_matrice', output_file=johnson_ST_matrices_file)
+        if not os.path.exists(data_dir):
+            print('Creating data directory')
+            os.makedirs(data_dir)
 
-    densitometry_file = os.path.join(data_dir,'ST-Kinases_densitometry.xlsx')
-    if not os.path.exists(densitometry_file):
-        print('Rearranging densitometry matrices')
-        PWM_Matrices.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_raw_matrices', output_file=densitometry_file)
+        johnson_ST_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM4_ESM.xlsx'
+        johnson_ST_matrices_original_file = os.path.join(data_dir,'johnson_ST_matrices.xlsx')
 
-    johnson_Y_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM4_ESM.xlsx'
-    johnson_Y_matrices_original_file = os.path.join(data_dir,'johnson_Y_matrices.xlsx')
+        if not os.path.exists(johnson_ST_matrices_original_file):
+            print('Downloading ST matrices')
+            Utility.download_file(johnson_ST_matrices_url, johnson_ST_matrices_original_file)
+            
+        johnson_ST_matrices_file = os.path.join(data_dir,'ST-Kinases.xlsx')
+        if not os.path.exists(johnson_ST_matrices_file):
+            print('Rearranging ST matrices')
+            PWM_Matrices.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_norm_scaled_matrice', output_file=johnson_ST_matrices_file)
 
-    if not os.path.exists(johnson_Y_matrices_original_file):
-        print('Downloading Y matrices')
-        Utility.download_file(johnson_Y_matrices_url, johnson_Y_matrices_original_file)
+        densitometry_file = os.path.join(data_dir,'ST-Kinases_densitometry.xlsx')
+        if not os.path.exists(densitometry_file):
+            print('Rearranging densitometry matrices')
+            PWM_Matrices.rearrange_matrices(johnson_ST_matrices_original_file, sheet_name = 'ser_thr_all_raw_matrices', output_file=densitometry_file)
 
-    johnson_Y_matrices_file = os.path.join(data_dir,'Y-Kinases.xlsx')
-    if not os.path.exists(johnson_Y_matrices_file):
-        print('Rearranging Y matrices')
-        PWM_Matrices.rearrange_matrices(johnson_Y_matrices_original_file, sheet_name = 'tyrosine_all_norm_scaled_matric', pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4', '5'], output_file = johnson_Y_matrices_file, remove_suffix = '_TYR')
+        johnson_Y_matrices_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM4_ESM.xlsx'
+        johnson_Y_matrices_original_file = os.path.join(data_dir,'johnson_Y_matrices.xlsx')
 
-    ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
-    ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
+        if not os.path.exists(johnson_Y_matrices_original_file):
+            print('Downloading Y matrices')
+            Utility.download_file(johnson_Y_matrices_url, johnson_Y_matrices_original_file)
 
-    if not os.path.exists(ST_matrix_to_uniprot):
-        Utility.download_file(ST_matrix_to_uniprot_url, ST_matrix_to_uniprot)
+        johnson_Y_matrices_file = os.path.join(data_dir,'Y-Kinases.xlsx')
+        if not os.path.exists(johnson_Y_matrices_file):
+            print('Rearranging Y matrices')
+            PWM_Matrices.rearrange_matrices(johnson_Y_matrices_original_file, sheet_name = 'tyrosine_all_norm_scaled_matric', pos = ['-5', '-4', '-3', '-2', '-1', '1', '2', '3', '4', '5'], output_file = johnson_Y_matrices_file, remove_suffix = '_TYR')
+
+        ST_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM3_ESM.xlsx'
+        ST_matrix_to_uniprot = os.path.join(data_dir,'ST-Kinases_to_Uniprot.xlsx')
+
+        if not os.path.exists(ST_matrix_to_uniprot):
+            Utility.download_file(ST_matrix_to_uniprot_url, ST_matrix_to_uniprot)
+            
+        Y_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM3_ESM.xlsx'
+        Y_matrix_to_uniprot = os.path.join(data_dir,'Y-Kinases_to_Uniprot.xlsx')
+
+        if not os.path.exists(Y_matrix_to_uniprot):
+            Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
+
+        ochoa_background_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM5_ESM.xlsx'
+
+
+        ochoa_background_original_file = os.path.join(data_dir,'ochoa_background.xlsx')
+
+
+        if not os.path.exists(ochoa_background_original_file):
+            print('Downloading Ochoa background')
+            Utility.download_file(ochoa_background_url, ochoa_background_original_file)
+
+
+        tyrosine_background_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM5_ESM.xlsx'
+
+        tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
+
+        if not os.path.exists(tyrosine_background_original_file):
+            print('Downloading tyrosine background')
+            Utility.download_file(tyrosine_background_url, tyrosine_background_original_file)
+
+        print('Loading ST matrices')
+        ST_matrices = PWM_Matrices(johnson_ST_matrices_file)
+        ST_matrices.add_densitometry(densitometry_file)
+
+        print('Loading Y matrices (w/ non-canonical)')
+        Y_matrices = PWM_Matrices(johnson_Y_matrices_file)
+
+        print('Creating scoring objects')
+        st_scoring = Scoring(ST_matrices)
+        y_scoring = Scoring(Y_matrices)
         
-    Y_matrix_to_uniprot_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM3_ESM.xlsx'
-    Y_matrix_to_uniprot = os.path.join(data_dir,'Y-Kinases_to_Uniprot.xlsx')
+        ochoa_background_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
 
-    if not os.path.exists(Y_matrix_to_uniprot):
-        Utility.download_file(Y_matrix_to_uniprot_url, Y_matrix_to_uniprot)
+        if not os.path.exists(ochoa_background_file) :
+            print('Building Ochoa background')
+            PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring, ochoa_background_file, progress='terminal')
 
-    ochoa_background_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05575-3/MediaObjects/41586_2022_5575_MOESM5_ESM.xlsx'
+        tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
+        tyrosine_background_file = os.path.join(data_dir, 'johnson_tyrosine_background_wfav.tsv')
 
-
-    ochoa_background_original_file = os.path.join(data_dir,'ochoa_background.xlsx')
-
-
-    if not os.path.exists(ochoa_background_original_file):
-        print('Downloading Ochoa background')
-        Utility.download_file(ochoa_background_url, ochoa_background_original_file)
+        if not os.path.exists(tyrosine_background_file) :
+            #doesn't matter if canonical or not because only using peptide sequences
+            print('Building tyrosine background')
+            PeptideBackground.background_factory(tyrosine_background_original_file, 'Annotation - Canonical only', y_scoring, tyrosine_background_file, progress='terminal')
 
 
-    tyrosine_background_url = 'https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07407-y/MediaObjects/41586_2024_7407_MOESM5_ESM.xlsx'
+        human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
+        if not os.path.exists(human_kinases_database_file):
+            print('Creating id mapping of human kinases')
+            Utility.build_human_kinase_database(data_dir, human_kinases_database_file, ST_matrices, Y_matrices)
+        
+        
+        kinase_to_uniprot_st_dict, entrez_to_kinase_st_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'ST')
+        kinase_to_uniprot_y_dict, entrez_to_kinase_y_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'Y')
+        
+        st_kinases_uniprot = set(kinase_to_uniprot_st_dict.values())
+        y_kinases_uniprot = set(kinase_to_uniprot_y_dict.values())
+        
+        human_entrez_st_ids = set(entrez_to_kinase_st_dict.keys())
+        human_entrez_y_ids = set(entrez_to_kinase_y_dict.keys())
+        
+        orthologs_dir = 'orthologs'
+        
+        #which kinases are in both sets
+        dual_specificity_kinases = st_kinases_uniprot & y_kinases_uniprot
 
-    tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
+        print('Dual specificity kinases')
+        print(dual_specificity_kinases)
+        
+        if not os.path.exists(orthologs_dir):
+            os.makedirs(orthologs_dir)
+        
+        """
+        arguments = [
+                        ('mouse', 10090, 'UP000000589'),
+                        ('fly', 7227, 'UP000000803'),
+                        ('worm', 6239, 'UP000001940'),
+                        ('yeast', 4932, 'UP000002311'),
+                        ('zebrafish', 7955, 'UP000000437')
+                    ]
+        """
+        arguments = [
+                        ('mouse', 10090),
+                        ('fly', 7227),
+                        ('worm', 6239),
+                        ('yeast', 4932),
+                        ('zebrafish', 7955)
+                    ] 
+        #for organism_name, taxon_id, proteome_id in arguments :
+        #    output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
+        for organism_name, taxon_id in arguments :
+            output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_orthologs.tsv')
+            if not os.path.exists(output_file):
+                print(f'Building ortholog database for {organism_name}')
+                #df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, proteome_id,threads=threads)            
+                df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, threads=threads)
+                df_final.to_csv(output_file, sep='\t', index=False)
+            else :
+                print(f'Ortholog database for {organism_name} already exists')
 
-    if not os.path.exists(tyrosine_background_original_file):
-        print('Downloading tyrosine background')
-        Utility.download_file(tyrosine_background_url, tyrosine_background_original_file)
+        entrez_to_human_kinase_dict = {**entrez_to_kinase_st_dict, **entrez_to_kinase_y_dict}
 
-    print('Loading ST matrices')
-    ST_matrices = PWM_Matrices(johnson_ST_matrices_file)
-    ST_matrices.add_densitometry(densitometry_file)
+        #for organism_name, taxon_id, proteome_id in arguments :
+        for organism_name, taxon_id in arguments :
+            ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_orthologs.tsv')
+            #ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
+            output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
+            #Utility.refactor_ortholog_file(ortholog_file, organism_name, entrez_to_human_kinase_dict, output_file)
+            Utility.refactor_ortholog_file(ortholog_file, entrez_to_human_kinase_dict, output_file)
+        
+        
+        for organism_name, _, in arguments :
+            output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_final.tsv')
+            if os.path.exists(output_file):
+                print(f'Final ortholog database for {organism_name} already exists')
+                continue
+            
+            refactored_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
+            df = pd.read_csv(refactored_file, sep='\t')
+            
+            unique_geneid_types = df['gene_id_type'].unique()
+            specific_geneid_types = unique_geneid_types[unique_geneid_types != 'GeneID']
+            
+            df_uniprot, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', 'GeneID')
+            print(f'UniProt unmapped ({organism_name}): {uniprot_unmapped}')
+            for geneid_type in specific_geneid_types :
+                if len(uniprot_unmapped) > 0:
+                    df_uniprot2, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', geneid_type, uniprot_unmapped)
+                    if(len(df_uniprot2) > 0):
+                        df_uniprot = pd.concat([df_uniprot, df_uniprot2])
+            
+            df_final = pd.concat([df, df_uniprot])
+            
+            Utility.build_final_orthologs_database(df_final, output_file)
 
-    print('Loading Y matrices (w/ non-canonical)')
-    Y_matrices = PWM_Matrices(johnson_Y_matrices_file)
-
-    print('Creating scoring objects')
-    st_scoring = Scoring(ST_matrices)
-    y_scoring = Scoring(Y_matrices)
-    
-    ochoa_background_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
-
-    if not os.path.exists(ochoa_background_file) :
-        print('Building Ochoa background')
-        PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring, ochoa_background_file, progress='terminal')
-
-    tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
-    tyrosine_background_file = os.path.join(data_dir, 'johnson_tyrosine_background_wfav.tsv')
-
-    if not os.path.exists(tyrosine_background_file) :
-        #doesn't matter if canonical or not because only using peptide sequences
-        print('Building tyrosine background')
-        PeptideBackground.background_factory(tyrosine_background_original_file, 'Annotation - Canonical only', y_scoring, tyrosine_background_file, progress='terminal')
-
-
-    human_kinases_database_file = os.path.join(data_dir, 'human_kinases_final.tsv')
-    if not os.path.exists(human_kinases_database_file):
-        print('Creating id mapping of human kinases')
-        Utility.build_human_kinase_database(data_dir, human_kinases_database_file, ST_matrices, Y_matrices)
-    
-    
-    kinase_to_uniprot_st_dict, entrez_to_kinase_st_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'ST')
-    kinase_to_uniprot_y_dict, entrez_to_kinase_y_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'Y')
-    
-    st_kinases_uniprot = set(kinase_to_uniprot_st_dict.values())
-    y_kinases_uniprot = set(kinase_to_uniprot_y_dict.values())
-    
-    human_entrez_st_ids = set(entrez_to_kinase_st_dict.keys())
-    human_entrez_y_ids = set(entrez_to_kinase_y_dict.keys())
-    
-    orthologs_dir = 'orthologs'
-    
-    #which kinases are in both sets
-    dual_specificity_kinases = st_kinases_uniprot & y_kinases_uniprot
-
-    print('Dual specificity kinases')
-    print(dual_specificity_kinases)
-    
-    if not os.path.exists(orthologs_dir):
-        os.makedirs(orthologs_dir)
-    
-    """
-    arguments = [
-                    ('mouse', 10090, 'UP000000589'),
-                    ('fly', 7227, 'UP000000803'),
-                    ('worm', 6239, 'UP000001940'),
-                    ('yeast', 4932, 'UP000002311'),
-                    ('zebrafish', 7955, 'UP000000437')
-                ]
-    """
-    arguments = [
-                    ('mouse', 10090),
-                    ('fly', 7227),
-                    ('worm', 6239),
-                    ('yeast', 4932),
-                    ('zebrafish', 7955)
-                ] 
-    #for organism_name, taxon_id, proteome_id in arguments :
-    #    output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
-    for organism_name, taxon_id in arguments :
-        output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_orthologs.tsv')
-        if not os.path.exists(output_file):
-            print(f'Building ortholog database for {organism_name}')
-            #df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, proteome_id,threads=threads)            
-            df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, threads=threads)
+            #print(df_final.head())
+            #sort by organism, gene_id_type, kinase_name
+            """
+            df_final = df_final.sort_values(by=['organism', 'gene_id_type', 'kinase_name'])
+            
+            df_final['symbol'] = df_final['symbol'].astype(str)
+            df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(set).reset_index()
+            df_group['symbol'] = df_group['symbol'].apply(lambda x: list(x))
+            #df_group['symbol'] = df_group['symbol'].apply(lambda x: sorted(x))
+            df_group['symbol'] = df_group.apply(lambda x: f'({x["kinase_name"]}-like){"+".join(x["symbol"])}' if len(x['symbol']) > 1 else x['symbol'][0], axis=1)
+            df_final = df_group.explode('gene_id')
+            
             df_final.to_csv(output_file, sep='\t', index=False)
-        else :
-            print(f'Ortholog database for {organism_name} already exists')
-
-    entrez_to_human_kinase_dict = {**entrez_to_kinase_st_dict, **entrez_to_kinase_y_dict}
-
-    #for organism_name, taxon_id, proteome_id in arguments :
-    for organism_name, taxon_id in arguments :
-        ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_orthologs.tsv')
-        #ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_{proteome_id}_orthologs.tsv')
-        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
-        #Utility.refactor_ortholog_file(ortholog_file, organism_name, entrez_to_human_kinase_dict, output_file)
-        Utility.refactor_ortholog_file(ortholog_file, entrez_to_human_kinase_dict, output_file)
-    
-    
-    for organism_name, _, in arguments :
-        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_final.tsv')
-        if os.path.exists(output_file):
-            print(f'Final ortholog database for {organism_name} already exists')
-            continue
-        
-        refactored_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
-        df = pd.read_csv(refactored_file, sep='\t')
-        
-        unique_geneid_types = df['gene_id_type'].unique()
-        specific_geneid_types = unique_geneid_types[unique_geneid_types != 'GeneID']
-        
-        df_uniprot, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', 'GeneID')
-        print(f'UniProt unmapped ({organism_name}): {uniprot_unmapped}')
-        for geneid_type in specific_geneid_types :
-            if len(uniprot_unmapped) > 0:
-                df_uniprot2, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', geneid_type, uniprot_unmapped)
-                if(len(df_uniprot2) > 0):
-                    df_uniprot = pd.concat([df_uniprot, df_uniprot2])
-        
-        df_final = pd.concat([df, df_uniprot])
-        
-        Utility.build_final_orthologs_database(df_final, output_file)
-
-        #print(df_final.head())
-        #sort by organism, gene_id_type, kinase_name
-        """
-        df_final = df_final.sort_values(by=['organism', 'gene_id_type', 'kinase_name'])
-        
-        df_final['symbol'] = df_final['symbol'].astype(str)
-        df_group = df_final.groupby(['kinase_type', 'organism', 'gene_id_type', 'kinase_name']).agg(set).reset_index()
-        df_group['symbol'] = df_group['symbol'].apply(lambda x: list(x))
-        #df_group['symbol'] = df_group['symbol'].apply(lambda x: sorted(x))
-        df_group['symbol'] = df_group.apply(lambda x: f'({x["kinase_name"]}-like){"+".join(x["symbol"])}' if len(x['symbol']) > 1 else x['symbol'][0], axis=1)
-        df_final = df_group.explode('gene_id')
-        
-        df_final.to_csv(output_file, sep='\t', index=False)
-        """
+            """
         
 if __name__ == '__main__' :
     argparse = argparse.ArgumentParser()

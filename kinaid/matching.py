@@ -205,8 +205,9 @@ class Scoring:
         self._range = pwm_matrices._range
 
     
-    def clean_sequence(self, sequence : str, mode = None) -> str:
+    def clean_sequence(self, sequence : str, mode = None, gap_to_replace = 'x') -> str:
         
+        sequence = sequence.replace(gap_to_replace, '_')
         phosphorylated_site, split_sequence = Scoring.split_by_phosphorylation_site(sequence, mode)
 
         left_side_len = 0 - self._range[0]

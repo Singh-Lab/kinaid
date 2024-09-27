@@ -293,6 +293,13 @@ def process_df_columns(df, organism) :
   )
   return out
 
+
+def write_archive(bytes_io, df_list, fileNameList):
+  with zipfile.ZipFile(bytes_io, mode='w') as zf:
+      for df,fn in zip(df_list,fileNameList):
+          df_bytes=df.to_csv(index=False).encode('utf-8')
+          zf.writestr(fn ,df_bytes)
+  
 '''
 Create Cache
 '''
@@ -340,7 +347,7 @@ about = html.Div([
         html.P('Refreshing or closing this page will clear and reset the data, generating a new session. While page is loaded, data will remain on the server at most 60 minutes since last activity', style={'font-weight':'bold'}),
         html.P('Please reference:', style={'text-align':'center', 'font-style':'oblique'}),
         html.P('Aman J, Zhu A, Wühr M, Shvartsman S, Singh M. (2024)', style={'text-align':'center', 'font-weight':'bold', 'font-style':'oblique'}),
-        html.A(href='https://github.com/Singh-Lab/kinase_match_dashboard', children=[
+        html.A(href='https://github.com/Singh-Lab/kinaid', children=[
           html.P('GitHub', style={'margin-left':'47%', 'font-weight':'bold', 'clickable':'true'})
         ]),
     ],
@@ -570,7 +577,7 @@ settings = html.Div(children=[
                                         style={
                                             'margin-left': '10px'
                                         },
-                                        value=['ambiguous'] if default_ambiguous else []
+                                        value=['ambiguous'] if default_ambiguous else [],
                                     )
                                 ]),
                                 #get threshold for ds
@@ -614,7 +621,8 @@ settings = html.Div(children=[
                                         style={
                                             'maxHeight': '500px',
                                             'overflowY': 'scroll',
-                                        }
+                                        },
+                                        disabled=True
                                     )
                                                     
                                 ])
@@ -629,7 +637,7 @@ settings = html.Div(children=[
             'margin': '10px',
             'width' : '65%'
         },
-        start_collapsed=True
+        start_collapsed=True,
         ),
         dbc.Button([dbc.Spinner(children= html.Div(id = 'loading'), size='sm'), 'Submit'],
                     size='lg', id='submit-button', color='primary', className='mr-1',
@@ -711,7 +719,7 @@ download_section = dbc.Row([
                             'height' : '2.8rem',
                             'font-size':'20px',
                             'margin-left':'47%',}),
-              dcc.Download(id='download-csv')
+              dcc.Download(id='download-data')
           ]),
         ])
 
@@ -1165,18 +1173,19 @@ app.layout = serve_layout
 Callbacks
 '''
 
-@app.callback([Output('kinase-selection', 'value'),
-                Output('kinase-selection', 'options'),
+@app.callback([Output('kinase-selection', 'value', allow_duplicate=True),
+                Output('kinase-selection', 'options', allow_duplicate=True),
                 Output('id-type-dropdown', 'options'),
                 #Output('id-type-dropdown', 'value', allow_duplicate=True),
                 Output('upload-button', 'disabled'),
-                Output('upload-data', 'disabled')],
+                Output('upload-data', 'disabled'),
+                Output('kinase-selection', 'disabled', allow_duplicate=True)],
               Input('organism-radioitems', 'value'),
               State('ambiguous-check', 'value'),
               prevent_initial_call=True
 
 )
-def click_organism(organism : str, ambiguous : str):
+def click_organism(organism : str, ambiguous : List[str]):
   '''
   Callback for clicking on an organism
     
@@ -1186,7 +1195,7 @@ def click_organism(organism : str, ambiguous : str):
   available_id_types = list(ortholog_manager.get_orthologs(organism).get_available_id_types())
   symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(available_id_types[0], ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False))
   symbol_options = [{'label': k, 'value': k} for k in symbol_names]
-  return (symbol_names, symbol_options, available_id_types, False, False)
+  return (symbol_names, symbol_options, available_id_types, False, False, False)
 
 
 @app.callback([
@@ -1399,7 +1408,7 @@ def press_submit(
     #get column names
     column_names_dict = {c:column_values[i] for c,i in column_id_to_index.items()}
 
-    kinaid_session = Session(session, organism, df, column_names_dict, _scoring_, _background_, ortholog_manager, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
+    kinaid_session = Session(session, organism, df, column_names_dict, _scoring_, _background_, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
     
     cache_lock.acquire()
     cache[session] = kinaid_session
@@ -1571,16 +1580,9 @@ def update_hub_figure(active, kinase_names, threshold, kinase_only, session, sta
 
   return fig, False
 
-def write_archive(df_list : List[pd.DataFrame], fileNameList : List[str]) -> bytes:
-    bytes_io = io.BytesIO()
-    with zipfile.ZipFile(bytes_io, mode="w") as zf:
-        for df,fn in zip(df_list,fileNameList):
-            df_bytes=df.to_csv(index=False).encode('utf-8')
-            zf.writestr(fn ,df_bytes)
-    return bytes_io.getvalue()
-            
+
 @app.callback([
-                Output('download-csv', 'data'),
+                Output('download-data', 'data'),
                 Output('timeout-popup', 'displayed', allow_duplicate=True),
               ],
               Input('download-button', 'n_clicks'),
@@ -1613,10 +1615,8 @@ def download_csv(n_clicks, session, started, dataframe_name, filename) :
     dfs_dict = kinaid_session.get_percentiles_dfs()
     df_list = list(dfs_dict.values())
     fileNameList = [f'{kt}_percentiles.csv'for kt in dfs_dict.keys()]
-    bytes_io = write_archive(df_list, fileNameList)
     out_file = filename.split('.')[0] + '_percentiles.zip'
-
-    return dcc.send_bytes(bytes_io, "zipFileName.zip")
+    return dcc.send_bytes(lambda x: write_archive(x, df_list, fileNameList), out_file), False
   elif dataframe_name == 'network' :
     df = kinaid_session.get_network_df()
     out_file = filename.split('.')[0] + '_network.csv'
@@ -1632,6 +1632,60 @@ def download_csv(n_clicks, session, started, dataframe_name, filename) :
 
   return no_update, False
 
+
+@app.callback(
+    [Output('kinase-selection', 'value', allow_duplicate=True),
+     Output('kinase-selection', 'options', allow_duplicate=True),
+     Output('kinase-selection', 'disabled', allow_duplicate=True)],
+    Input('ambiguous-check', 'value'),
+    [State('organism-radioitems', 'value'),
+     State('id-type-dropdown', 'value')],
+    prevent_initial_call=True
+)
+def update_kinase_selection(ambiguous : List[str], organism : str, id_type : str) :
+  '''
+  Update kinase selection
+  '''
+  if organism is None:
+    return no_update
+  symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False)))
+  symbol_options = [{'label': k, 'value': k} for k in symbol_names]
+  return symbol_names, symbol_options, False
+
+
+@app.callback([
+                Output({'type': 'figure', 'index': 'peptide_scatter'}, 'figure', allow_duplicate=True),
+                Output('timeout-popup', 'displayed', allow_duplicate=True),
+              ],
+                Input('scatter-kinase-selection', 'value'),
+              [
+                State('session-id', 'data'),
+                State('session-started', 'data')
+              ],
+              prevent_initial_call=True
+)
+def update_peptide_scatter_figure(kinase_names, session, started) :
+  '''
+  Update peptide scatter figure
+  '''
+  
+  print('Updating peptide scatter figure ---kinase')
+
+  if not started :
+    return no_update
+  
+  if session not in cache :
+    print('Session not in cache')
+    return no_update, True
+    
+  cache_lock.acquire()
+  kinaid_session = cache[session]
+  cache[session] = kinaid_session
+  cache_lock.release()
+  
+  fig = kinaid_session.get_peptide_scatter_fig(kinase_names)
+  
+  return fig, False
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port='8060', debug=True)
