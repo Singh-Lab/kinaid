@@ -917,5 +917,5 @@ if __name__ == '__main__' :
     argparse.add_argument('--threads', type=int, default=8)
     args = argparse.parse_args()
     
-    DefaultConfiguration(args.threads)
+    Utility.DefaultConfiguration(args.threads)
     print('Configuration complete')
