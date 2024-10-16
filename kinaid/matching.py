@@ -283,12 +283,16 @@ class PeptideBackground :
         
         return PeptideBackground(output_file)
     
-    def __init__(self, background_file : str) :
+    def __init__(self, background_file : str, debug : bool = False) :
         df = pd.read_csv(background_file, sep = '\t', usecols=lambda x: x not in {'sequence', 'clean_seq'})
         self._background_size = len(df)
         kinase_names = list(df.columns)
         self._kinase_names = kinase_names
         self._background = {k:sorted(df[k].to_list()) for k in kinase_names}
+        if debug :
+            print(kinase_names)
+            print(len(kinase_names))
+            print(self._background_size)
 
     def get_percentile(self, score : float, kinase : str, low_score_skip : bool = False) :
         if low_score_skip and ((type(score) == float  or type(score) == int) and (score <= 0)) :

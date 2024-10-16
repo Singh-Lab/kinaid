@@ -157,7 +157,7 @@ class OrthologManager:
         self.ortholog_dir = orthology_dir
         if organisms is None or len(organisms) == 0 :
             ortholog_files = [f for f in os.listdir(orthology_dir) if f.endswith(suffix)]
-            self.organism_list = [f.split('_')[0] for f in ortholog_files]
+            self.organism_list = [f.removesuffix(suffix) for f in ortholog_files]
         else :
             ortholog_files = [os.path.join(orthology_dir, organism + suffix) for organism in organisms if organism != 'human']
             if not all([os.path.exists(f) for f in ortholog_files]) :

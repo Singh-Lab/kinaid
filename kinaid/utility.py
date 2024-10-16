@@ -556,6 +556,8 @@ class Utility :
 
         gene_ids_job = Utility.make_map_ids_job(genes_to_map, original_geneid_type, geneid_type)
         time.sleep(3)
+        if gene_ids_job is None:
+            return df_copy, unmapped_kinases
         gene_ids_dict = Utility.get_map_ids_results(gene_ids_job)
 
         unmapped_kinases = {k for k in unmapped_kinases if k in kinase_to_gene_id_dict and all(g not in gene_ids_dict or len(gene_ids_dict[g]) == 0 for g in kinase_to_gene_id_dict[k])}
@@ -911,7 +913,67 @@ class Utility :
             
             df_final.to_csv(output_file, sep='\t', index=False)
             """
+    @staticmethod
+    def build_organism_orthologs(organism_name : str, taxon_id : int, orthologs_dir : str, human_kinases_database_file : str, threads : int = 8) :
+        if not os.path.exists(human_kinases_database_file):
+            print('Missing human kinases database file')
+            print('Please run Utility.DefaultConfiguration()')
+            return
         
+        kinase_to_uniprot_st_dict, entrez_to_kinase_st_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'ST')
+        kinase_to_uniprot_y_dict, entrez_to_kinase_y_dict  = Utility.load_human_kinases_database(human_kinases_database_file, 'Y')
+        
+        st_kinases_uniprot = set(kinase_to_uniprot_st_dict.values())
+        y_kinases_uniprot = set(kinase_to_uniprot_y_dict.values())
+        
+        human_entrez_st_ids = set(entrez_to_kinase_st_dict.keys())
+        human_entrez_y_ids = set(entrez_to_kinase_y_dict.keys())
+        
+        #which kinases are in both sets
+        dual_specificity_kinases = st_kinases_uniprot & y_kinases_uniprot
+
+        print('Dual specificity kinases')
+        print(dual_specificity_kinases)
+        
+        if not os.path.exists(orthologs_dir):
+            os.makedirs(orthologs_dir)
+    
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_orthologs.tsv')
+        if not os.path.exists(output_file):
+            print(f'Building ortholog database for {organism_name}')
+            df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, threads=threads)
+            df_final.to_csv(output_file, sep='\t', index=False)
+        else :
+            print(f'Ortholog database for {organism_name} already exists')
+        
+        entrez_to_human_kinase_dict = {**entrez_to_kinase_st_dict, **entrez_to_kinase_y_dict}
+        
+        ortholog_file = os.path.join(orthologs_dir, f'{organism_name}_{str(taxon_id)}_orthologs.tsv')
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
+        Utility.refactor_ortholog_file(ortholog_file, entrez_to_human_kinase_dict, output_file)
+        
+        output_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_final.tsv')
+        if os.path.exists(output_file):
+            print(f'Final ortholog database for {organism_name} already exists')
+            return
+                
+        refactored_file = os.path.join(orthologs_dir, f'{organism_name}_orthologs_refactored.tsv')
+        df = pd.read_csv(refactored_file, sep='\t')
+        
+        unique_geneid_types = df['gene_id_type'].unique()
+        specific_geneid_types = unique_geneid_types[unique_geneid_types != 'GeneID']
+        
+        df_uniprot, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', 'GeneID')
+        print(f'UniProt unmapped ({organism_name}): {uniprot_unmapped}')
+        for geneid_type in specific_geneid_types :
+            if len(uniprot_unmapped) > 0:
+                df_uniprot2, uniprot_unmapped = Utility.add_supported_id_by_geneid(df, 'UniProtKB', geneid_type, uniprot_unmapped)
+                if(len(df_uniprot2) > 0):
+                    df_uniprot = pd.concat([df_uniprot, df_uniprot2])
+        
+        df_final = pd.concat([df, df_uniprot])
+        
+        Utility.build_final_orthologs_database(df_final, output_file)
 if __name__ == '__main__' :
     argparse = argparse.ArgumentParser()
     argparse.add_argument('--threads', type=int, default=8)
