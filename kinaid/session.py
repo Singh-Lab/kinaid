@@ -319,7 +319,7 @@ class Session :
         zscore_df['zscore_sig'] = zscore_df['p_adj'].apply(lambda x: x <= fdr_threshold)
         
         zscore_df.sort_values(by='zscore', ascending=False, inplace=True)
-        fig = px.bar(zscore_df, x='zscore', y='short', hover_data={'zscore_sig': False, 'short' : False, 'zscore' : True, 'p_adj' : True, 'kinase' : True}, color='zscore_sig')
+        fig = px.bar(zscore_df, x='zscore', y='short', hover_data={'zscore_sig': False, 'short' : False, 'mean': True, 'zscore' : True, 'p_adj' : True, 'kinase' : True}, color='zscore_sig')
         
         fig.update_layout(yaxis_categoryorder='total ascending')
         fig.update_layout(legend_title_text='FDR <= %0.2f' % fdr_threshold)
