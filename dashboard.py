@@ -866,7 +866,7 @@ enrichment_analysis = html.Div([
             dbc.Input(
               id='fdr-input',
               type='number',
-              value=0.10,
+              value=0.05,
               min=0,
               max=1,
               step=0.01,
@@ -1687,5 +1687,38 @@ def update_peptide_scatter_figure(kinase_names, session, started) :
   
   return fig, False
 
+
+@app.callback([
+                Output({'type': 'figure', 'index' : 'zscore'}, 'figure', allow_duplicate=True),
+                Output('timeout-popup', 'displayed', allow_duplicate=True)
+              ],
+                Input('fdr-input', 'value'),
+              [
+                State('session-id', 'data'),
+                State('session-started', 'data')
+              ],
+              prevent_initial_call=True
+)
+def update_zscore_figure(fdr, session, started) :
+    '''
+    Update zscore figure
+    '''
+    if not started :
+        return no_update, True
+    
+    if session not in cache :
+        print('Session not in cache')
+        return no_update
+    
+    cache_lock.acquire()
+    kinaid_session = cache[session]
+    cache[session] = kinaid_session
+    cache_lock.release()
+    
+    fig = kinaid_session.get_zscore_fig(fdr)
+    
+    return fig, False
+  
+  
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port='8050', debug=True)
