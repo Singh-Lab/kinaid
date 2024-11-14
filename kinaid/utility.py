@@ -786,23 +786,33 @@ class Utility :
 
         print('Loading ST matrices')
         ST_matrices = PWM_Matrices(johnson_ST_matrices_file)
-        ST_matrices.add_densitometry(densitometry_file)
+        #ST_matrices.add_densitometry(densitometry_file)
+        
+        print('Loading ST matrices (w/ favorability)')
+        ST_matrices_wfav = PWM_Matrices(johnson_ST_matrices_file)
+        ST_matrices_wfav.add_densitometry(densitometry_file)
 
         print('Loading Y matrices (w/ non-canonical)')
         Y_matrices = PWM_Matrices(johnson_Y_matrices_file)
 
         print('Creating scoring objects')
         st_scoring = Scoring(ST_matrices)
+        st_scoring_wfav = Scoring(ST_matrices_wfav)
         y_scoring = Scoring(Y_matrices)
         
-        ochoa_background_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
+        ochoa_background_wfav_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
 
+        if not os.path.exists(ochoa_background_wfav_file) :
+            print('Building Ochoa background (w/ favorability)')
+            PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring_wfav, ochoa_background_wfav_file, progress='terminal')
+        
+        ochoa_background_file = os.path.join(data_dir, 'johnson_ochoa_background.tsv')
         if not os.path.exists(ochoa_background_file) :
             print('Building Ochoa background')
             PeptideBackground.background_factory(ochoa_background_original_file, 'Supplementary Table 3', st_scoring, ochoa_background_file, progress='terminal')
 
         tyrosine_background_original_file = os.path.join(data_dir,'tyrosine_background.xlsx')
-        tyrosine_background_file = os.path.join(data_dir, 'johnson_tyrosine_background_wfav.tsv')
+        tyrosine_background_file = os.path.join(data_dir, 'johnson_tyrosine_background.tsv')
 
         if not os.path.exists(tyrosine_background_file) :
             #doesn't matter if canonical or not because only using peptide sequences

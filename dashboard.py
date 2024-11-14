@@ -78,16 +78,22 @@ johnson_Y_matrices_file = os.path.join(data_dir,'Y-Kinases.xlsx')
 densitometry_file = os.path.join(data_dir,'ST-Kinases_densitometry.xlsx')
 
 ST_matrices = PWM_Matrices(johnson_ST_matrices_file)
-ST_matrices.add_densitometry(densitometry_file)
+ST_matrices_wfav = PWM_Matrices(johnson_ST_matrices_file)
+
+ST_matrices_wfav.add_densitometry(densitometry_file)
 
 Y_matrices = PWM_Matrices(johnson_Y_matrices_file)
 
 _scoring_ = {'ST': Scoring(ST_matrices), 'Y' :Scoring(Y_matrices)}
+_scoring_wfav = {'ST': Scoring(ST_matrices_wfav), 'Y' :Scoring(Y_matrices)}
 
-st_background_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
-y_background_file = os.path.join(data_dir, 'johnson_tyrosine_background_wfav.tsv')
+
+st_background_file = os.path.join(data_dir, 'johnson_ochoa_background.tsv')
+st_background_wfav_file = os.path.join(data_dir, 'johnson_ochoa_background_wfav.tsv')
+y_background_file = os.path.join(data_dir, 'johnson_tyrosine_background.tsv')
 
 _background_ = {'ST' : PeptideBackground(st_background_file), 'Y' : PeptideBackground(y_background_file)}
+_background_wfav = {'ST' : PeptideBackground(st_background_wfav_file), 'Y' : PeptideBackground(y_background_file)}
 
 cyto.load_extra_layouts()
 
@@ -1408,7 +1414,12 @@ def press_submit(
     #get column names
     column_names_dict = {c:column_values[i] for c,i in column_id_to_index.items()}
 
-    kinaid_session = Session(session, organism, df, column_names_dict, _scoring_, _background_, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
+    if (len(favorability) > 0) and (favorability[0] == 'favorability') :
+      print('Using favorability')
+      kinaid_session = Session(session, organism, df, column_names_dict, _scoring_wfav, _background_wfav, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
+    else :
+      print('Not using favorability')
+      kinaid_session = Session(session, organism, df, column_names_dict, _scoring_, _background_, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
     
     cache_lock.acquire()
     cache[session] = kinaid_session
