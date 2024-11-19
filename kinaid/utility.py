@@ -218,6 +218,7 @@ class Utility :
         else:
             return results
 
+    @staticmethod
     def __job2__(shared_objects, entrez_id) :
         in_taxon = shared_objects['in_taxon']
         out_taxon = shared_objects['out_taxon']
@@ -717,8 +718,7 @@ class Utility :
         df_final.to_csv(output_file, sep='\t', index=False)
 
     @staticmethod        
-    def DefaultConfiguration(threads : int = 8) :
-        data_dir = './data'
+    def DefaultConfiguration(threads : int = 8, data_dir = './data', orthologs_dir = './orthologs') :
         
         if not os.path.exists(data_dir):
             print('Creating data directory')
@@ -834,8 +834,6 @@ class Utility :
         
         human_entrez_st_ids = set(entrez_to_kinase_st_dict.keys())
         human_entrez_y_ids = set(entrez_to_kinase_y_dict.keys())
-        
-        orthologs_dir = 'orthologs'
         
         #which kinases are in both sets
         dual_specificity_kinases = st_kinases_uniprot & y_kinases_uniprot
