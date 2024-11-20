@@ -14,6 +14,8 @@ __version__ = '1.0'
 __license__ = 'MIT'
 __email__ = 'javeda@princeton.edu'
 
+
+
 from dash import Dash, dcc, html, dash_table, Input, Output, State, no_update, ALL, MATCH, callback_context
 import dash_bootstrap_components as dbc
 import uuid
@@ -31,6 +33,7 @@ from icecream import ic
 from typing import List
 import dash_cytoscape as cyto
 import zipfile
+import argparse
 
 
 
@@ -38,7 +41,6 @@ import zipfile
 external_stylesheets = [dbc.themes.LITERA]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 
-app.title = 'KINAID Dashboard'
 logo_image = 'assets/logo3.png'
 
 example_filename = 'Leutert_KC_example.csv'
@@ -1173,7 +1175,6 @@ def serve_layout() :
       sidebar,
       content
   ])
-app.layout = serve_layout
 
 '''
 Callbacks
@@ -1732,4 +1733,13 @@ def update_zscore_figure(fdr, session, started) :
   
   
 if __name__ == '__main__':
-  app.run(host='0.0.0.0', port='8050', debug=True)
+  argparser = argparse.ArgumentParser()
+  argparser.add_argument('--port', type=int, default=8050)
+  argparser.add_argument('--host', type=str, default='0.0.0.0')
+  argparser.add_argument('--no_debug', action='store_false')
+  args = argparser.parse_args()
+  
+  app.title = 'KINAID Dashboard'
+  app.layout = serve_layout
+
+  app.run(host=args.host, port=args.port, debug=args.no_debug)
