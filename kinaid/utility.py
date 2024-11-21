@@ -982,12 +982,26 @@ class Utility :
         df_final = pd.concat([df, df_uniprot])
         
         Utility.build_final_orthologs_database(df_final, output_file)
-if __name__ == '__main__' :
-    argparse = argparse.ArgumentParser()
-    argparse.add_argument('--threads', type=int, default=8)
-    argparse.add_argument('--data_dir', type=str, default='./data')
-    argparse.add_argument('--orthologs_dir', type=str, default='./orthologs')
-    args = argparse.parse_args()
+        
+def run_default_configuration() :
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--threads', type=int, default=8, help='Number of threads to use')
+    argparser.add_argument('--data_dir', type=str, default='./data', help='Directory to store data files')
+    argparser.add_argument('--orthologs_dir', type=str, default='./orthologs', help='Directory to store ortholog files')
+    args = argparser.parse_args()
+    Utility.DefaultConfiguration(threads=args.threads, data_dir=args.data_dir, orthologs_dir=args.orthologs_dir)
+
+def run_add_organism() :
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--organism_name', type=str, help='Name of organism')
+    argparser.add_argument('--taxon_id', type=int, help='DIOPT Taxon ID of organism')
+    argparser.add_argument('--orthologs_dir', type=str, default='./orthologs', help='Directory to store ortholog files')
+    argparser.add_argument('--human_kinases_database_file', type=str, default='./data/human_kinases_final.tsv', help='File containing human kinases database')
+    argparser.add_argument('--threads', type=int, default=8, help='Number of threads to use')
+    args = argparser.parse_args()
     
-    Utility.DefaultConfiguration(args.threads)
+    Utility.build_organism_orthologs(args.organism_name, args.taxon_id, args.orthologs_dir, args.human_kinases_database_file, threads=args.threads)
+    
+if __name__ == '__main__' :
+    run_default_configuration()
     print('Configuration complete')
