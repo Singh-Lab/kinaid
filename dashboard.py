@@ -351,7 +351,7 @@ About Section
 about = html.Div([
         html.H2('KINAID', style={'text-align':'center'}),
         html.Hr(),
-        html.P('This is a web application for the analysis of phosphoproteomics data. It uses the matrices from Johnson et al. (2023) to perform the matching between kinsases and substrates.', style={'text-align':'left'}),
+        html.P('This is a web application for the analysis of phosphoproteomics data. It uses the matrices from Johnson et al. (2023) and Yaron-Barir et al. (2024) to perform the matching between kinsases and substrates.', style={'text-align':'left'}),
         html.P('Refreshing or closing this page will clear and reset the data, generating a new session. While page is loaded, data will remain on the server at most 60 minutes since last activity', style={'font-weight':'bold'}),
         html.P('Please reference:', style={'text-align':'center', 'font-style':'oblique'}),
         html.P('Aman J, Zhu A, Wühr M, Shvartsman S, Singh M. (2024)', style={'text-align':'center', 'font-weight':'bold', 'font-style':'oblique'}),
