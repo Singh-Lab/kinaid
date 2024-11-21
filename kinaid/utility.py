@@ -985,6 +985,8 @@ class Utility :
 if __name__ == '__main__' :
     argparse = argparse.ArgumentParser()
     argparse.add_argument('--threads', type=int, default=8)
+    argparse.add_argument('--data_dir', type=str, default='./data')
+    argparse.add_argument('--orthologs_dir', type=str, default='./orthologs')
     args = argparse.parse_args()
     
     Utility.DefaultConfiguration(args.threads)
