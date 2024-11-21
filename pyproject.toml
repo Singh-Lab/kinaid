@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinaid"
-version = "1.0.0"
+version = "1.0.1"
 description = "KINAID : Kinase Activity and Inference Dashboard"
 authors = [
     { name = "Javed M. Aman" }
@@ -20,6 +20,8 @@ dependencies = [
     "dash_cytoscape",
     "mpire"
 ]
+readme = "README.md"
+license = {file = "LICENSE"}
 
 [project.optional-dependencies]
 # Define any optional dependencies if needed
@@ -30,3 +32,7 @@ kinaid-add = "kinaid:run_add_organism"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[project.urls]
+homepage = "kinaid.princeton.edu"
+repository = "https://github.com/Singh-Lab/kinaid"
