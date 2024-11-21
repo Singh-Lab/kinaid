@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinaid"
+version = "0.1"
+description = "KINAID : Kinase Activity and Inference Dashboard"
+authors = [
+    { name = "Javed M. Aman" }
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "pandas",
+    "tqdm",
+    "plotly",
+    "statsmodels",
+    "dash_cytoscape",
+    "mpire"
+]
+
+[project.optional-dependencies]
+# Define any optional dependencies if needed
+
+[project.scripts]
+kinaid-install = "kinaid:run_default_configuration"
+kinaid-add = "kinaid:run_add_organism"
+
+[tool.setuptools.packages.find]
+where = ["."]
