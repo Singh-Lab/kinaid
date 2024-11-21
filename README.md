@@ -1,2 +1,2 @@
-# kinaid
-KINAID Dashboard and library code
+# KINAID
+## Kinase Inference and Activity Dashboard
