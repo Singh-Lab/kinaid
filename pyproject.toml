@@ -34,5 +34,5 @@ kinaid-add = "kinaid:run_add_organism"
 where = ["."]
 
 [project.urls]
-homepage = "kinaid.princeton.edu"
+homepage = "https://kinaid.princeton.edu"
 repository = "https://github.com/Singh-Lab/kinaid"
