@@ -1,5 +1,5 @@
 ## KINAID
-<img src="assets/logo3.png" width="500">
+<img src="https://kinaid.princeton.edu/assets/logo3.png" width="500">
 
 
 # Public webserver version
