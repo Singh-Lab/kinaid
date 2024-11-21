@@ -2,8 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name='kinaid',
-    version='1.0',
-    find_packages=find_packages(),
+    version='0.1',
+    packages=['kinaid'],
+    package_dir={'kinaid': 'kinaid'},
     install_requires=[
         'numpy',
         'scipy',
@@ -17,4 +18,10 @@ setup(
         'mpire'
     ],
     author='Javed M. Aman',
+    entry_points={
+        'console_scripts': [
+            'kinaid-install = kinaid:run_default_configuration',
+            'kinaid-add = kinaid:run_add_organism',
+        ]
+    }
 )
