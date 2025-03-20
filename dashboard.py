@@ -42,6 +42,7 @@ external_stylesheets = [dbc.themes.LITERA]
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 
 logo_image = 'assets/logo3.png'
+NETWORK_SIZE_THRESHOLD = 750
 
 example_filename = 'Leutert_KC_example.csv'
 example_df = pd.read_csv(example_filename)
@@ -62,7 +63,7 @@ data_dir = './data'
 orthologs_suffix = '_orthologs_final.tsv'
 
 default_organism = 'fly'
-default_ambiguous = True
+default_ambiguous = False
 
 human_kinase_file = os.path.join(data_dir,'human_kinases_final.tsv')
 
@@ -354,9 +355,15 @@ about = html.Div([
         html.P('This is a web application for the analysis of phosphoproteomics data. It uses the matrices from Johnson et al. (2023) and Yaron-Barir et al. (2024) to perform the matching between kinsases and substrates.', style={'text-align':'left'}),
         html.P('Refreshing or closing this page will clear and reset the data, generating a new session. While page is loaded, data will remain on the server at most 60 minutes since last activity', style={'font-weight':'bold'}),
         html.P('Please reference:', style={'text-align':'center', 'font-style':'oblique'}),
-        html.P('Aman J, Zhu A, Wühr M, Shvartsman S, Singh M. (2024)', style={'text-align':'center', 'font-weight':'bold', 'font-style':'oblique'}),
+        html.P('Aman J, Zhu A, Wühr M, Shvartsman S, Singh M. (2025)', style={'text-align':'center', 'font-weight':'bold', 'font-style':'oblique'}),
         html.A(href='https://github.com/Singh-Lab/kinaid', children=[
           html.P('GitHub', style={'margin-left':'47%', 'font-weight':'bold', 'clickable':'true'})
+        ]),
+        html.A(href='https://compbio.cs.princeton.edu/kinaid/orthologs', children=[
+          html.P('Kinase Ortholog Maps', style={'margin-left':'40%', 'font-weight':'bold', 'clickable':'true'}),
+        ]),
+        html.A(href='https://compbio.cs.princeton.edu/kinaid/kinase_identity_scores.csv', children=[
+          html.P('Kinase Specificity Analysis', style={'margin-left':'38%', 'font-weight':'bold', 'clickable':'true'}),
         ]),
     ],
     id='about'
@@ -562,7 +569,7 @@ settings = html.Div(children=[
                         dbc.Row([
                             dbc.Col([
                                 #toggle checkmark to use favorability or not
-                                dbc.Label('Use S/T favorability?'),
+                                dbc.Label('Use S/T favorability?', className='fw-bold'),
                                 html.Div([
                                     dbc.Checklist(
                                         id='favorability-check',
@@ -575,12 +582,12 @@ settings = html.Div(children=[
                                     value=['favorability']
                                     )
                                 ]),
-                                dbc.Label('Allow ambiguous kinase mappings'),
+                                dbc.Label('Allow one-to-many mapping?', className='fw-bold'),
                                 html.Div([
                                     dbc.Checklist(
                                         id='ambiguous-check',
                                         options=[
-                                            {'label': 'Yes (Recommended)', 'value': 'ambiguous'},
+                                            {'label': 'Use ambiguous mapping', 'value': 'ambiguous'},
                                         ],
                                         style={
                                             'margin-left': '10px'
@@ -589,7 +596,7 @@ settings = html.Div(children=[
                                     )
                                 ]),
                                 #get threshold for ds
-                                dbc.Label(f'Match threshold (default {default_match_threshold})'),
+                                dbc.Label(f'Match threshold (default {default_match_threshold})',className='fw-bold'),
 
                                 html.Div(
                                     [dbc.Input(
@@ -604,7 +611,7 @@ settings = html.Div(children=[
                                         }
                                     ),]
                                 ),
-                                dbc.Label('Subset of Kinases'),
+                                dbc.Label('Subset of Kinases', className='fw-bold'),
                                 dcc.Upload(
                                     dbc.Button('Upload list of kinases', color='primary', className='mr-1',
                                                 style={'width':'8rem',
@@ -619,7 +626,7 @@ settings = html.Div(children=[
 
                             ]),
                             dbc.Col([
-                                dbc.Label('Kinases to match'),
+                                dbc.Label('Kinases to match', className='fw-bold'),
                                 html.Div([
                                     dcc.Dropdown(id='kinase-selection',
                                         options=[{'label': k, 'value': k} for k in default_kinase_symbols],
@@ -662,13 +669,27 @@ settings = html.Div(children=[
 '''
 Time Out
 '''
-timeout_dialog = html.Div([
+timeout_popup = html.Div([
   dcc.ConfirmDialog(
     id='timeout-popup',
     message='Your session has timed out. Please refresh the page to start a new session.',
     displayed=False
     )
 ])
+
+# Pop-up modal for large networks
+network_size_popup = dbc.Modal(
+    [
+        dbc.ModalHeader("Large Network Warning"),
+        dbc.ModalBody("The network size is large. This may affect performance. Do you want to continue?"),
+        dbc.ModalFooter([
+            dbc.Button("Cancel", id="cancel-network-size", color="secondary", n_clicks=0),
+            dbc.Button("Continue", id="confirm-network-size", color="primary", n_clicks=0)
+        ]),
+    ],
+    id="network-size-popup",
+    is_open=False,
+)
 
 '''
 Result Table
@@ -806,7 +827,7 @@ figures = html.Div([
           dbc.Spinner(
             children = [
               dcc.Graph(
-                id = {'type': 'figure', 'index': 'peptide_scatter'}
+                id = {'type': 'figure', 'index': 'peptide_volcano'}
               ),
             ],
           ),
@@ -836,7 +857,7 @@ figures = html.Div([
         id='peptide-scatter-item'      
       ),
     ],
-      id={'type': 'figure-accordion', 'index': 'peptide_scatter'},
+      id={'type': 'figure-accordion', 'index': 'peptide_volcano'},
       start_collapsed=True,
     ),
     dbc.Accordion(
@@ -1063,7 +1084,7 @@ tooltips = html.Div([
   ),
   dbc.Tooltip(
     'A volcano plot of the mass-spec p-value vs the log2FC in phosphorylation',
-    target={'type': 'figure-accordion', 'index': 'peptide_scatter'},
+    target={'type': 'figure-accordion', 'index': 'peptide_volcano'},
     placement='top',
     style={'font-size':'1rem'}
   ),
@@ -1150,7 +1171,7 @@ content= html.Div(
        about,
        example,
        settings,
-       timeout_dialog,
+       timeout_popup,
        downloads,
        figures,
        enrichment_analysis,
@@ -1173,7 +1194,8 @@ def serve_layout() :
       #dcc.Store(data=None, id='upload-excel-store'),
       #dcc.Store(data=None, id='upload-data-store'),
       sidebar,
-      content
+      content,
+      network_size_popup
   ])
 
 '''
@@ -1507,45 +1529,65 @@ def update_figure(active, id, session, started) :
 #update network graph
 @app.callback([
                 Output('network-spinner', 'children'),
+                Output('network-size-popup', 'is_open', allow_duplicate=True),
                 Output('timeout-popup', 'displayed', allow_duplicate=True),
               ],
               [
                 Input({'type': 'cyto-accordion', 'index': 'network'}, 'active_item'),
-                Input('network-match-threshold', 'value')
+                Input('network-match-threshold', 'value'),
+                Input('confirm-network-size', 'n_clicks'),  # User confirms to proceed
+                Input('cancel-network-size', 'n_clicks')  # User cancels
               ],
               [
                 State('session-id', 'data'),
-                State('session-started', 'data')
+                State('session-started', 'data'),
+                State('network-size-popup', 'is_open')
               ],
               prevent_initial_call=True
 )
-def update_network(active, threshold, session, started) :
+def update_network(active, threshold, confirm_click, cancel_click, session, started, popup_open) :
   '''
   Draw network figure
   '''
   if active is None :
-    return no_update
-  #get session from cache
-    
+    return no_update    
   if not started :
     return no_update
   
   if session not in cache :
     print('Session not in cache')
-    return no_update, True
+    return no_update, False, True
     
   cache_lock.acquire()
   kinaid_session = cache[session]
   cache[session] = kinaid_session
   cache_lock.release()
 
-  if active is None :
-    return no_update
-
+  network_size = kinaid_session.get_size_of_kinase_network(threshold)
   
+  #print('Network size: %d' % network_size)
+  #print('popup open: %s' % popup_open)
+  #print('confirm click: %s' % confirm_click)
+  #print('cancel click: %s' % cancel_click)
+
+  # If the network size is within spec, generate the figure immediately
+  if network_size <= NETWORK_SIZE_THRESHOLD:
+    fig = kinaid_session.get_full_kinase_network_fig(threshold)
+    return fig, False, False  # No pop-up needed
+  
+
+  # If network is too large and user has NOT confirmed yet, show the pop-up
+  if network_size > NETWORK_SIZE_THRESHOLD and not popup_open:
+    print('Network too large')
+    return no_update, True, False  # Show the pop-up
+
+  # If user cancels, do nothing and close the pop-up
+  if cancel_click > 0:
+    return no_update, False, False  # Close pop-up, don't generate figure
+      
   fig = kinaid_session.get_full_kinase_network_fig(threshold)
   
-  return fig, False
+  return fig, False, False
 
 @app.callback([
                 Output('hub-spinner', 'children'),
@@ -1666,7 +1708,7 @@ def update_kinase_selection(ambiguous : List[str], organism : str, id_type : str
 
 
 @app.callback([
-                Output({'type': 'figure', 'index': 'peptide_scatter'}, 'figure', allow_duplicate=True),
+                Output({'type': 'figure', 'index': 'peptide_volcano'}, 'figure', allow_duplicate=True),
                 Output('timeout-popup', 'displayed', allow_duplicate=True),
               ],
                 Input('scatter-kinase-selection', 'value'),

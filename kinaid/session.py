@@ -448,6 +448,11 @@ class Session :
         
         return self.convert_network_to_cytoscape(hub_network_df, highlighted_symbols=highlighted_symbols_short)
     
+    def get_size_of_kinase_network(self, threshold : float = 99.0) -> int :
+        full_network_df = self.get_kinase_only_network_df()
+        full_network_df = full_network_df[full_network_df['percentile'] >= threshold]
+        return len(full_network_df)
+    
     def get_full_kinase_network_fig(self, threshold : float = 99.0) -> cyto.Cytoscape :
         full_network_df = self.get_kinase_only_network_df()
         full_network_df = full_network_df[full_network_df['percentile'] >= threshold]
@@ -462,7 +467,7 @@ class Session :
         
         if name == 'barplot':
             return self.get_counts_barplot_fig()
-        elif name == 'peptide_scatter':
+        elif name == 'peptide_scatter' or name == 'peptide_volcano':
             return self.get_peptide_scatter_fig()
         elif name == 'heatmap':
             return self.get_all_heatmap_figs()
@@ -489,19 +494,3 @@ class Session :
         else :
             return {'height': '50rem'}
     
-
-
-
-
-
-
-        
-        
-        
-        
-        
-        
-
-
-        
-        

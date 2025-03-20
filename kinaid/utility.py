@@ -6,8 +6,16 @@ import numpy as np
 from mpire import WorkerPool
 from .matching import PWM_Matrices, Scoring, PeptideBackground
 import argparse
-
+from Bio import Entrez, SeqIO
 from typing import List, Tuple, Set
+from urllib.error import HTTPError, URLError
+from tqdm import tqdm
+
+tqdm.pandas()
+
+
+Entrez.email = "javeda@princeton.edu"  # Replace with your email
+
 
 class Utility :
     __MAPPING_API = 'https://rest.uniprot.org/idmapping/run/'
@@ -340,6 +348,45 @@ class Utility :
                 
         return result_df   
 
+    @staticmethod
+    def geneid_to_proteins(gene_id : str) -> bool:
+        
+        try:
+            handle = Entrez.elink(dbfrom='gene', db='protein', id=gene_id)
+            record = Entrez.read(handle)
+            handle.close()
+        except (HTTPError, URLError) as e:
+            print(f"Error fetching links for GeneID {gene_id}: {e}")
+            return None
+
+        if not record or 'LinkSetDb' not in record[0] or not record[0]['LinkSetDb']:
+            return None
+
+        protein_ids = []
+        for linkset in record[0]['LinkSetDb']:
+            if linkset['LinkName'] == 'gene_protein':
+                protein_ids = [link['Id'] for link in linkset['Link']]
+                break
+
+        if not protein_ids:
+            return None
+        
+        return protein_ids
+    
+    @staticmethod
+    def geneid_is_pseudogene(gene_id : str) -> bool:
+        proteins = Utility.geneid_to_proteins(gene_id)
+        if proteins is None:
+            return True
+        return False
+    
+    @staticmethod
+    def remove_pseudogenes(df: pd.DataFrame, debug=False) :
+        df = df.copy()
+        df['is_pseudogene'] = df['species_entrez_id'].progress_apply(Utility.geneid_is_pseudogene)
+        df = df[~df['is_pseudogene']]
+        return df
+    
     @staticmethod
     def refactor_ortholog_file(ortholog_file : str,
                             entrez_to_human_kinase_dict : dict,
@@ -868,6 +915,8 @@ class Utility :
                 print(f'Building ortholog database for {organism_name}')
                 #df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, proteome_id,threads=threads)            
                 df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, threads=threads)
+                print('Remove pseudogenes')
+                df_final = Utility.remove_pseudogenes(df_final)
                 df_final.to_csv(output_file, sep='\t', index=False)
             else :
                 print(f'Ortholog database for {organism_name} already exists')
@@ -950,6 +999,8 @@ class Utility :
         if not os.path.exists(output_file):
             print(f'Building ortholog database for {organism_name}')
             df_final = Utility.build_ortholog_database_for_organism(human_entrez_st_ids, human_entrez_y_ids, organism_name, taxon_id, threads=threads)
+            print('Remove pseudogenes')
+            df_final = Utility.remove_pseudogenes(df_final)
             df_final.to_csv(output_file, sep='\t', index=False)
         else :
             print(f'Ortholog database for {organism_name} already exists')
