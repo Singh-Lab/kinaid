@@ -582,17 +582,17 @@ settings = html.Div(children=[
                                     value=['favorability']
                                     )
                                 ]),
-                                dbc.Label('Allow one-to-many mapping?', className='fw-bold'),
+                                dbc.Label('Restrict to one-to-one mapping?', className='fw-bold'),
                                 html.Div([
                                     dbc.Checklist(
-                                        id='ambiguous-check',
+                                        id='not-ambiguous-check',
                                         options=[
-                                            {'label': 'Use ambiguous mapping', 'value': 'ambiguous'},
+                                            {'label': 'Use one-to-one mapping', 'value': 'not-ambiguous'},
                                         ],
                                         style={
                                             'margin-left': '10px'
                                         },
-                                        value=['ambiguous'] if default_ambiguous else [],
+                                        value=['not-ambiguous'] if not default_ambiguous else [],
                                     )
                                 ]),
                                 #get threshold for ds
@@ -1210,11 +1210,11 @@ Callbacks
                 Output('upload-data', 'disabled'),
                 Output('kinase-selection', 'disabled', allow_duplicate=True)],
               Input('organism-radioitems', 'value'),
-              State('ambiguous-check', 'value'),
+              State('not-ambiguous-check', 'value'),
               prevent_initial_call=True
 
 )
-def click_organism(organism : str, ambiguous : List[str]):
+def click_organism(organism : str, not_ambiguous : List[str]):
   '''
   Callback for clicking on an organism
     
@@ -1222,7 +1222,7 @@ def click_organism(organism : str, ambiguous : List[str]):
   '''
   print(callback_context.triggered_prop_ids)
   available_id_types = list(ortholog_manager.get_orthologs(organism).get_available_id_types())
-  symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(available_id_types[0], ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False))
+  symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(available_id_types[0], not_ambiguous[0] != 'not-ambiguous' if len(not_ambiguous) > 0 else True))
   symbol_options = [{'label': k, 'value': k} for k in symbol_names]
   return (symbol_names, symbol_options, available_id_types, False, False, False)
 
@@ -1235,12 +1235,12 @@ def click_organism(organism : str, ambiguous : List[str]):
               [
                 State('upload-kinases', 'filename'),
                 State('organism-radioitems', 'value'),
-                State('ambiguous-check', 'value'),
+                State('not-ambiguous-check', 'value'),
                 State('id-type-dropdown', 'value'),
               ],
               prevent_initial_call=True
 )
-def upload_kinases(contents : str, filename : str, organism : str, ambiguous : List[str], id_type : str) :
+def upload_kinases(contents : str, filename : str, organism : str, not_ambiguous : List[str], id_type : str) :
   '''
   Callback for uploading kinases
   '''
@@ -1249,7 +1249,7 @@ def upload_kinases(contents : str, filename : str, organism : str, ambiguous : L
 
   print('loaded file: %s' % filename)
 
-  current_symbol_names_list = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(id_type,  ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False))
+  current_symbol_names_list = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(id_type,  not_ambiguous[0] != 'not-ambiguous' if len(not_ambiguous) > 0 else True))
 
   current_symbol_names = set(current_symbol_names_list)
   #expect txt file
@@ -1381,7 +1381,7 @@ def change_sheet(sheet_name, excel_data, filename, organism) :
                 State({'type': 'column-dropdown', 'index': ALL}, 'value'),
                 State('id-type-dropdown', 'value'),
                 State('threshold-input', 'value'),
-                State('ambiguous-check', 'value'),
+                State('not-ambiguous-check', 'value'),
                 State('favorability-check', 'value'),
                 State('sheet-dropdown', 'disabled'),
               ],
@@ -1399,7 +1399,7 @@ def press_submit(
     column_values : list,
     id_type : str,
     threshold : float,
-    ambiguous : List[str],
+    not_ambiguous : List[str],
     favorability : str,
     sheet_disabled : bool
     ) :
@@ -1439,10 +1439,10 @@ def press_submit(
 
     if (len(favorability) > 0) and (favorability[0] == 'favorability') :
       print('Using favorability')
-      kinaid_session = Session(session, organism, df, column_names_dict, _scoring_wfav, _background_wfav, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
+      kinaid_session = Session(session, organism, df, column_names_dict, _scoring_wfav, _background_wfav, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(not_ambiguous[0] != 'not-ambiguous' if len(not_ambiguous) > 0 else True), debug=True)
     else :
       print('Not using favorability')
-      kinaid_session = Session(session, organism, df, column_names_dict, _scoring_, _background_, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False), debug=True)
+      kinaid_session = Session(session, organism, df, column_names_dict, _scoring_, _background_, ortholog_manager, selected_symbols=kinase_names, id_type=id_type, ambiguous=(not_ambiguous[0] != 'not-ambiguous' if len(not_ambiguous) > 0 else True), debug=True)
     
     cache_lock.acquire()
     cache[session] = kinaid_session
@@ -1691,18 +1691,18 @@ def download_csv(n_clicks, session, started, dataframe_name, filename) :
     [Output('kinase-selection', 'value', allow_duplicate=True),
      Output('kinase-selection', 'options', allow_duplicate=True),
      Output('kinase-selection', 'disabled', allow_duplicate=True)],
-    Input('ambiguous-check', 'value'),
+    Input('not--check', 'value'),
     [State('organism-radioitems', 'value'),
      State('id-type-dropdown', 'value')],
     prevent_initial_call=True
 )
-def update_kinase_selection(ambiguous : List[str], organism : str, id_type : str) :
+def update_kinase_selection(not_ambiguous : List[str], organism : str, id_type : str) :
   '''
   Update kinase selection
   '''
   if organism is None:
     return no_update
-  symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(id_type, ambiguous=(ambiguous[0] == 'ambiguous' if len(ambiguous) > 0 else False)))
+  symbol_names = list(ortholog_manager.get_orthologs(organism).get_all_kinase_symbols_for_gene_id(id_type, ambiguous=(not_ambiguous[0] != 'not-ambiguous' if len(not_ambiguous) > 0 else True)))
   symbol_options = [{'label': k, 'value': k} for k in symbol_names]
   return symbol_names, symbol_options, False
 
