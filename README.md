@@ -13,6 +13,19 @@ https://kinaid.princeton.edu
 ### install resources
 can take up to 3GB HDD memory.
 
+## Requires the following libraries
+
+- `biopython`
+- `dash`
+- `dash-cytoscape`
+- `mpire`
+- `numpy`
+- `openpyxl`
+- `pandas`
+- `pyxlsb`
+- `scipy`
+- `statsmodels`
+
   ```
   cd <DIRECTORY TO INSTALL KINAID RESOURCES>
   kinaid-install
