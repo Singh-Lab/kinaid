@@ -7,7 +7,8 @@ name = "kinaid"
 version = "1.1.0"
 description = "KINAID : Kinase Activity and Inference Dashboard"
 authors = [
-    { name = "Javed M. Aman" }
+    { name = "Javed M. Aman" , email = "javeda@princeton.edu"},
+    { name = "Mona Singh" , email = "mona@cs.princeton.edu"}
 ]
 dependencies = [
     "numpy",
@@ -17,11 +18,13 @@ dependencies = [
     "tqdm",
     "plotly",
     "statsmodels",
+    "dash",
     "dash_cytoscape",
     "mpire",
     "python-calamine",
     "xlsxwriter",
-    "openpyxl"
+    "openpyxl",
+    "pyxslsb"
 ]
 readme = "README.md"
 license = {file = "LICENSE"}
