@@ -1101,7 +1101,7 @@ tooltips = html.Div([
     style={'font-size':'1rem'}
   ),
   dbc.Tooltip(
-    'A scatter plot of the -log adjusted p-value (of z-scores) vs mean log2FC of the matches for each kinase',
+    'A volcano plot of the -log adjusted p-value (of z-scores) vs mean log2FC of the matches for each kinase',
     target={'type': 'figure-accordion', 'index': 'kinase_scatter'},
     placement='top',
     style={'font-size':'1rem'}
@@ -1459,12 +1459,15 @@ def press_submit(
     return ('Finished', result_table, kinase_names, kinase_names, threshold, download_section, True)
 
 @app.callback(   
-  [Output('organism-radioitems', 'value'),
-   Output('upload-data', 'contents'),
-   Output('upload-data', 'filename'),
-   Output('upload-button', 'disabled',allow_duplicate=True)],
-   Input('example-button', 'n_clicks'),
-   prevent_initial_call=True
+  [
+    Output('not-ambiguous-check', 'value'),
+    Output('organism-radioitems', 'value'),
+    Output('upload-data', 'contents'),
+    Output('upload-data', 'filename'),
+    Output('upload-button', 'disabled',allow_duplicate=True)
+  ],
+  Input('example-button', 'n_clicks'),
+  prevent_initial_call=True
 )
 def click_example(n_clicks) :
   '''
@@ -1479,7 +1482,7 @@ def click_example(n_clicks) :
 
   #make it look like an uploaded file with utf-8 encoding and base64 encoding
   csv_string = 'data:text/csv;charset=utf-8;base64,' + base64.b64encode(csv_string.encode()).decode()
-  return 'yeast', csv_string, example_filename, False
+  return [],'yeast', csv_string, example_filename, False
 
 
 @app.callback([
