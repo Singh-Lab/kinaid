@@ -1054,5 +1054,6 @@ def run_add_organism() :
     Utility.build_organism_orthologs(args.organism_name, args.taxon_id, args.orthologs_dir, args.human_kinases_database_file, threads=args.threads)
     
 if __name__ == '__main__' :
+    print('Starting default configuration')
     run_default_configuration()
     print('Configuration complete')

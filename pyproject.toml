@@ -11,7 +11,7 @@ authors = [
     { name = "Mona Singh" , email = "mona@cs.princeton.edu"}
 ]
 dependencies = [
-    "biopython",
+    "biopython==1.79",
     "numpy",
     "scipy",
     "scikit-learn",
