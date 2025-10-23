@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kinaid"
-version = "1.1.3"
+version = "1.1.4"
 description = "KINAID : Kinase Activity and Inference Dashboard"
 authors = [
     { name = "Javed M. Aman" , email = "javeda@princeton.edu"},
@@ -30,6 +30,9 @@ dependencies = [
 readme = "README.md"
 license = {file = "LICENSE"}
 
+[project]
+requires-python = ">=3.10"
+
 [project.optional-dependencies]
 # Define any optional dependencies if needed
 
@@ -37,8 +40,11 @@ license = {file = "LICENSE"}
 kinaid-install = "kinaid:run_default_configuration"
 kinaid-add = "kinaid:run_add_organism"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 
 [project.urls]
 homepage = "https://kinaid.princeton.edu"
